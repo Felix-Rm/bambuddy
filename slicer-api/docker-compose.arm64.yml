@@ -1,0 +1,16 @@
+# Override file for the slicer-api sidecar stack on ARM64.
+#
+# This file is not meant to be used on its own. It is intended to be used in
+# combination with the default docker-compose file, for example:
+#   docker compose -f docker-compose.yml -f docker-compose.arm64.yml up -d
+#
+# For any setup questions, see the 'Server-Side Slicing (Slicer API)' page in
+# the Bambuddy wiki. Also check the README and default compose file in this
+# directory for usage instructions and other details.
+
+services:
+  orca-slicer-api:
+    platform: linux/amd64
+
+  bambu-studio-api:
+    platform: linux/amd64
