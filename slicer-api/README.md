@@ -38,6 +38,10 @@ at all. For ARM64 hosts (Raspberry Pi 4/5, Apple Silicon Linux), run
 the sidecar on a separate x86_64 box and point Bambuddy at it via the
 **Sidecar URL** field — the sidecar doesn't need to live next to Bambuddy.
 
+For interested users, an experimental ARM64 setup solution exists. It allows
+using the AMD64 images on ARM64 hosts via emulation. For further details, see 
+the [Experimental setup for ARM64](#experimental-setup-for-arm64) section below.
+
 ## Ports
 
 | Service | Default host port | Why this port |
@@ -113,6 +117,29 @@ pinned to) and recreates the containers.
 To roll back to the sidecar that shipped with a previous Bambuddy
 release, set `SIDECAR_TAG=bambuddy-X.Y.Z` in `.env` and re-run the two
 commands above.
+
+## Experimental setup for ARM64
+
+This section describes an experimental setup for running the sidecar on ARM64 hosts.
+It uses the AMD64 images via emulation and therefore requires additional setup steps.
+Slicing performance will be slower than on native AMD64 hosts. Please read the
+additional setup instructions in the [wiki](https://wiki.bambuddy.cool/features/slicer-api/) before proceeding.
+
+### Quick start for ARM64:
+
+```bash
+cd slicer-api/
+cp .env.example .env       # edit ports if you like
+
+# OrcaSlicer only (default profile):
+docker compose -f docker-compose.yml -f docker-compose.arm64.yml up -d
+curl http://localhost:3003/health
+
+# Both slicers:
+docker compose -f docker-compose.yml -f docker-compose.arm64.yml --profile bambu up -d
+curl http://localhost:3001/health   # bambu-studio-api
+curl http://localhost:3003/health   # orca-slicer-api
+```
 
 ## Troubleshooting
 
