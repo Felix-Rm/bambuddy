@@ -38,9 +38,10 @@ at all. For ARM64 hosts (Raspberry Pi 4/5, Apple Silicon Linux), run
 the sidecar on a separate x86_64 box and point Bambuddy at it via the
 **Sidecar URL** field — the sidecar doesn't need to live next to Bambuddy.
 
-For interested users, an experimental ARM64 setup solution exists. It allows
-using the AMD64 images on ARM64 hosts via emulation. For further details, see 
-the [Experimental setup for ARM64](#experimental-setup-for-arm64) section below.
+If a separate x86_64 box isn't an option, the amd64 images can be run on
+an ARM64 host under emulation — experimental, roughly 3-6x slower than
+native, and a stopgap until native ARM64 images ship. See
+[Experimental setup for ARM64](#experimental-setup-for-arm64) below.
 
 ## Ports
 
@@ -120,26 +121,45 @@ commands above.
 
 ## Experimental setup for ARM64
 
-This section describes an experimental setup for running the sidecar on ARM64 hosts.
-It uses the AMD64 images via emulation and therefore requires additional setup steps.
-Slicing performance will be slower than on native AMD64 hosts. Please read the
-additional setup instructions in the [wiki](https://wiki.bambuddy.cool/features/slicer-api/) before proceeding.
+Runs the `linux/amd64` images on an ARM64 host under QEMU emulation, via
+the `docker-compose.arm64.yml` override in this folder. Expect roughly
+3-6x slower slicing than native, worsening with model complexity. This is
+a stopgap until native ARM64 images ship, not a replacement for running
+the sidecar on an x86_64 box — if you have one, use it.
 
-### Quick start for ARM64:
+**Set up QEMU binfmt on the host first**, or the containers fail with
+`exec format error`. On Debian/Ubuntu that is `qemu-user-static` plus
+`binfmt-support`; Docker Desktop on Apple Silicon already has it. The
+per-distribution commands are in the
+[wiki](https://wiki.bambuddy.cool/features/slicer-api/) — do that before
+the steps below.
+
+### Quick start for ARM64
 
 ```bash
 cd slicer-api/
 cp .env.example .env       # edit ports if you like
 
+# Make every later `docker compose` command pick up the ARM64 override:
+echo 'COMPOSE_FILE=docker-compose.yml:docker-compose.arm64.yml' >> .env
+
 # OrcaSlicer only (default profile):
-docker compose -f docker-compose.yml -f docker-compose.arm64.yml up -d
+docker compose up -d
 curl http://localhost:3003/health
 
 # Both slicers:
-docker compose -f docker-compose.yml -f docker-compose.arm64.yml --profile bambu up -d
+docker compose --profile bambu up -d
 curl http://localhost:3001/health   # bambu-studio-api
 curl http://localhost:3003/health   # orca-slicer-api
 ```
+
+That `COMPOSE_FILE` line is what makes the rest of this README work
+unchanged on ARM64 — **Updating** included. Without it every command has
+to name both files (`docker compose -f docker-compose.yml -f
+docker-compose.arm64.yml …`), and the first bare `docker compose pull` or
+`up -d` drops the override: on a host with no amd64 emulation registered
+for that image you get a manifest error, and once native ARM64 images
+exist you would silently switch between them and back.
 
 ## Troubleshooting
 
