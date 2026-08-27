@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, setStreamToken, getStreamToken, withStreamToken } from '../api/client';
+import { api, setStreamToken, getStreamToken, getStreamTokenSetAt, getAuthToken, withStreamToken } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 
 /**
@@ -55,12 +55,18 @@ export function useStreamTokenSync() {
   // ``true`` on first render because ``authEnabled`` defaults to false,
   // firing a 401 POST on the login page before AuthContext had a chance
   // to settle on ``authEnabled=true, user=null``.
+  const persisted = getStreamToken();
+  const persistedAt = getStreamTokenSetAt();
   const { data } = useQuery({
     queryKey: ['camera-stream-token', user?.id ?? null],
     queryFn: () => api.getCameraStreamToken(),
-    enabled: !authLoading && (!authEnabled || user !== null),
+    enabled: !authLoading && (!authEnabled || user !== null || !!getAuthToken()),
     staleTime: 50 * 60 * 1000, // refresh at 50 min (tokens expire at 60)
     refetchInterval: 50 * 60 * 1000,
+    // A camera popup copies sessionStorage from the opener. Reuse that token
+    // so the first <img> request does not wait on a fresh mint.
+    initialData: persisted ? { token: persisted } : undefined,
+    initialDataUpdatedAt: persisted ? persistedAt : undefined,
   });
 
   useEffect(() => {
@@ -72,8 +78,6 @@ export function useStreamTokenSync() {
     if (newToken) {
       rewriteMediaSrcWithToken(document, newToken);
     }
-
-    return () => setStreamToken(null);
   }, [data?.token]);
 
   // Listen for image/video load errors on token-protected URLs.

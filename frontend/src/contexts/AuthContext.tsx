@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { ApiError, api, getAuthToken, setAuthToken } from '../api/client';
+import { ApiError, api, getAuthToken, setAuthToken, setStreamToken } from '../api/client';
 import type { LoginResponse, Permission, TokenPersistence, UserResponse } from '../api/client';
 
 interface AuthContextType {
@@ -178,6 +178,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = () => {
     setAuthToken(null);
+    setStreamToken(null);
     setUser(null);
     api.logout().catch(() => {
       // Ignore logout errors

@@ -2,12 +2,13 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { X, RefreshCw, AlertTriangle, Maximize2, Minimize2, GripVertical, WifiOff, ZoomIn, ZoomOut, Fullscreen, Minimize, Stethoscope } from 'lucide-react';
-import { api, getAuthToken, withStreamToken } from '../api/client';
+import { api, withStreamToken } from '../api/client';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { ChamberLight } from './icons/ChamberLight';
 import { SkipObjectsModal, SkipObjectsIcon } from './SkipObjectsModal';
 import { CameraDiagnoseModal } from './CameraDiagnoseModal';
+import { CameraSourceSwitcher, printerHasExternalCamera, type CameraSource } from './CameraSourceSwitcher';
 
 interface EmbeddedCameraViewerProps {
   printerId: number;
@@ -98,6 +99,7 @@ export function EmbeddedCameraViewer({ printerId, printerName, viewerIndex = 0, 
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const stallCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  const [sourceOverride, setSourceOverride] = useState<CameraSource | null>(null);
   const [showSkipObjectsModal, setShowSkipObjectsModal] = useState(false);
   // Modal opens from the error-state "Diagnose" button when the user
   // hits "Camera unavailable" — saves a round trip through "open a
@@ -110,6 +112,9 @@ export function EmbeddedCameraViewer({ printerId, printerName, viewerIndex = 0, 
     queryFn: () => api.getPrinter(printerId),
     enabled: printerId > 0,
   });
+
+  const hasExternalCamera = printerHasExternalCamera(printer);
+  const selectedSource: CameraSource = sourceOverride ?? (hasExternalCamera ? 'external' : 'builtin');
 
   // Fetch printer status for light toggle and skip objects
   const { data: status } = useQuery({
@@ -152,29 +157,14 @@ export function EmbeddedCameraViewer({ printerId, printerName, viewerIndex = 0, 
     return () => clearTimeout(saveTimeout);
   }, [state, storageKey]);
 
-  // Cleanup on unmount
-  const stopSentRef = useRef(false);
+  // Closing the <img> aborts the HTTP body; the backend drops this viewer's
+  // fan-out subscription. No /camera/stop.
   useEffect(() => {
-    stopSentRef.current = false;
-    const stopUrl = `/api/v1/printers/${printerId}/camera/stop`;
-
-    const sendStopOnce = () => {
-      if (printerId > 0 && !stopSentRef.current) {
-        stopSentRef.current = true;
-        const headers: Record<string, string> = {};
-        const token = getAuthToken();
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-        fetch(stopUrl, { method: 'POST', keepalive: true, headers }).catch(() => {});
-      }
-    };
-
     const imgElement = imgRef.current;
-
     return () => {
       if (imgElement) {
         imgElement.src = '';
       }
-      sendStopOnce();
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
       if (stallCheckIntervalRef.current) clearInterval(stallCheckIntervalRef.current);
@@ -455,14 +445,21 @@ export function EmbeddedCameraViewer({ printerId, printerName, viewerIndex = 0, 
     setIsReconnecting(false);
     if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
     if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+    setImageKey(Date.now());
+  };
 
-    const stopHeaders: Record<string, string> = {};
-    const stopToken = getAuthToken();
-    if (stopToken) stopHeaders['Authorization'] = `Bearer ${stopToken}`;
-    fetch(`/api/v1/printers/${printerId}/camera/stop`, { method: 'POST', headers: stopHeaders }).catch(() => {});
-
-    if (imgRef.current) imgRef.current.src = '';
-    setTimeout(() => setImageKey(Date.now()), 100);
+  const switchCameraSource = (next: CameraSource) => {
+    if (next === selectedSource) return;
+    // Changing img.src closes this viewer's HTTP connection. The backend
+    // unsubscribes from that source's fan-out when the generator is
+    // cancelled — no /camera/stop. Other viewers of the same source keep it.
+    setSourceOverride(next);
+    setStreamError(false);
+    setReconnectAttempts(0);
+    setIsReconnecting(false);
+    if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+    setImageKey(Date.now());
   };
 
   // Drag handlers
@@ -555,7 +552,8 @@ export function EmbeddedCameraViewer({ printerId, printerName, viewerIndex = 0, 
     }
   }, [isDragging, isResizing, dragOffset]);
 
-  const streamUrl = withStreamToken(`/api/v1/printers/${printerId}/camera/stream?fps=15&t=${imageKey}`);
+  const sourceQuery = sourceOverride ? `&source=${encodeURIComponent(sourceOverride)}` : '';
+  const streamUrl = withStreamToken(`/api/v1/printers/${printerId}/camera/stream?fps=15&t=${imageKey}${sourceQuery}`);
 
   return (
     <div
@@ -580,6 +578,12 @@ export function EmbeddedCameraViewer({ printerId, printerName, viewerIndex = 0, 
           <span className="truncate">{printer?.name || printerName}</span>
         </div>
         <div className="flex items-center gap-1 no-drag">
+          {hasExternalCamera && !isMinimized && (
+            <CameraSourceSwitcher
+              selected={selectedSource}
+              onSelect={switchCameraSource}
+            />
+          )}
           <button
             onClick={() => chamberLightMutation.mutate(!status?.chamber_light)}
             disabled={!status?.connected || chamberLightMutation.isPending || !hasPermission('printers:control')}

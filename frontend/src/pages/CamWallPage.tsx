@@ -25,6 +25,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { CameraWall, type CameraWallStatus } from '../components/CameraWall';
 import { type CameraTileStatusMode } from '../components/CameraTile';
+import { openPrinterCameraWindow } from '../components/CameraSourceSwitcher';
 import { api, setStreamToken } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -172,7 +173,7 @@ export function CamWallPage() {
         statusMode={statusMode}
         statuses={kiosk ? kioskStatuses : undefined}
         showSettings={!kiosk}
-        onTileClick={kiosk ? undefined : (id) => window.open(`/camera/${id}`, `camera-${id}`)}
+        onTileClick={kiosk ? undefined : (id) => openPrinterCameraWindow(id)}
         // Writes to the same localStorage keys the Printers page reads, so a
         // change made here follows the user back there. A kiosk wall hides the
         // popover, so these never fire.

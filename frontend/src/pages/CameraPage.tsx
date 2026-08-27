@@ -10,6 +10,7 @@ import { useStreamTokenSync } from '../hooks/useCameraStreamToken';
 import { ChamberLight } from '../components/icons/ChamberLight';
 import { SkipObjectsModal, SkipObjectsIcon } from '../components/SkipObjectsModal';
 import { CameraDiagnoseModal } from '../components/CameraDiagnoseModal';
+import { CameraSourceSwitcher, printerHasExternalCamera, type CameraSource } from '../components/CameraSourceSwitcher';
 
 const MAX_RECONNECT_ATTEMPTS = 5;
 const INITIAL_RECONNECT_DELAY = 2000; // 2 seconds
@@ -20,7 +21,7 @@ export function CameraPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const { hasPermission, authEnabled, user } = useAuth();
+  const { hasPermission, authEnabled, user, loading: authLoading } = useAuth();
   const { printerId } = useParams<{ printerId: string }>();
   const id = parseInt(printerId || '0', 10);
   const [searchParams] = useSearchParams();
@@ -34,18 +35,19 @@ export function CameraPage() {
   const { data: streamTokenData, isPending: streamTokenPending } = useQuery({
     queryKey: ['camera-stream-token', user?.id ?? null],
     queryFn: () => api.getCameraStreamToken(),
-    enabled: authEnabled ? !!user : true,
+    enabled: !authLoading && (!authEnabled || user !== null || !!getAuthToken()),
     staleTime: 50 * 60 * 1000,
   });
   const streamTokenValue = streamTokenData?.token ?? getStreamToken();
 
   const [streamMode, setStreamMode] = useState<'stream' | 'snapshot'>('stream');
+  const [sourceOverride, setSourceOverride] = useState<CameraSource | null>(null);
   const [showSkipObjectsModal, setShowSkipObjectsModal] = useState(false);
   const [showDiagnoseModal, setShowDiagnoseModal] = useState(false);
   const [streamError, setStreamError] = useState(false);
   const [streamLoading, setStreamLoading] = useState(true);
   const [imageKey, setImageKey] = useState(Date.now());
-  const [transitioning, setTransitioning] = useState(false);
+  const [shownUrl, setShownUrl] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const [isReconnecting, setIsReconnecting] = useState(false);
@@ -74,6 +76,9 @@ export function CameraPage() {
     queryFn: () => api.getPrinter(id),
     enabled: id > 0,
   });
+
+  const hasExternalCamera = printerHasExternalCamera(printer);
+  const selectedSource: CameraSource = sourceOverride ?? (hasExternalCamera ? 'external' : 'builtin');
 
   // Fetch printer status for light toggle and skip objects
   const { data: status } = useQuery({
@@ -118,56 +123,27 @@ export function CameraPage() {
     };
   }, [printer]);
 
-  // Cleanup on unmount - stop the camera stream
-  // Track if we've already sent the stop signal to avoid duplicate calls
-  const stopSentRef = useRef(false);
-
+  // Closing the <img> (src='' or unmount) aborts the HTTP body; the backend
+  // drops this viewer's fan-out subscription. No /camera/stop.
   useEffect(() => {
-    const stopUrl = `/api/v1/printers/${id}/camera/stop`;
-    stopSentRef.current = false;
-
-    const sendStopOnce = () => {
-      if (id > 0 && !stopSentRef.current) {
-        stopSentRef.current = true;
-        const headers: Record<string, string> = {};
-        const token = getAuthToken();
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-        fetch(stopUrl, { method: 'POST', keepalive: true, headers }).catch(() => {});
-      }
-    };
-
-    // Handle page unload/close with keepalive fetch (more reliable than sendBeacon, supports auth)
-    const handleBeforeUnload = () => {
-      sendStopOnce();
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
-    // Store ref value for cleanup - ref may change by cleanup time
     const imgElement = imgRef.current;
-
     return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-
-      // Clear the image source first to stop the stream
       if (imgElement) {
         imgElement.src = '';
       }
-      // Send stop signal only once
-      sendStopOnce();
     };
   }, [id]);
 
   // Auto-hide loading after timeout
   useEffect(() => {
-    if (streamLoading && !transitioning) {
+    if (streamLoading && !shownUrl) {
       const timeout = streamMode === 'stream' ? 3000 : 20000;
       const timer = setTimeout(() => {
         setStreamLoading(false);
       }, timeout);
       return () => clearTimeout(timer);
     }
-  }, [streamMode, streamLoading, imageKey, transitioning]);
+  }, [streamMode, streamLoading, imageKey, shownUrl]);
 
   // Fullscreen change listener - refresh stream after fullscreen transition
   useEffect(() => {
@@ -179,20 +155,14 @@ export function CameraPage() {
       setPanOffset({ x: 0, y: 0 });
 
       // Refresh stream after fullscreen transition to prevent stall
-      if (streamMode === 'stream' && !transitioning) {
-        // Clear image src first, then set new key after delay
-        if (imgRef.current) {
-          imgRef.current.src = '';
-        }
-        setTimeout(() => {
-          setStreamLoading(true);
-          setImageKey(Date.now());
-        }, 200);
+      if (streamMode === 'stream') {
+        setStreamLoading(true);
+        setImageKey(Date.now());
       }
     };
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, [streamMode, transitioning]);
+  }, [streamMode]);
 
   // Save window size and position when user resizes or moves
   // Works for both popup windows and standalone camera pages
@@ -279,9 +249,9 @@ export function CameraPage() {
 
   // Stall detection - periodically check if stream is still receiving frames
   useEffect(() => {
-    // Only skip stall check during initial load, reconnecting, or transitioning
+    // Only skip stall check during initial load or reconnecting
     // Continue checking even during streamError to detect recovery
-    if (streamMode !== 'stream' || streamLoading || isReconnecting || transitioning) {
+    if (streamMode !== 'stream' || (streamLoading && !shownUrl) || isReconnecting) {
       if (stallCheckIntervalRef.current) {
         clearInterval(stallCheckIntervalRef.current);
         stallCheckIntervalRef.current = null;
@@ -327,9 +297,14 @@ export function CameraPage() {
         stallCheckIntervalRef.current = null;
       }
     };
-  }, [streamMode, streamLoading, streamError, isReconnecting, transitioning, id, attemptReconnect]);
+  }, [streamMode, streamLoading, streamError, isReconnecting, shownUrl, id, attemptReconnect]);
 
   const handleStreamError = () => {
+    // Incoming feed failed while the previous one is still on screen —
+    // keep that frame instead of going black.
+    if (shownUrl && shownUrl !== nextUrl) {
+      return;
+    }
     setStreamLoading(false);
 
     // Only auto-reconnect for live stream mode
@@ -382,24 +357,11 @@ export function CameraPage() {
     }
   };
 
-  const stopStream = () => {
-    if (id > 0) {
-      const headers: Record<string, string> = {};
-      const token = getAuthToken();
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      fetch(`/api/v1/printers/${id}/camera/stop`, { method: 'POST', headers }).catch(() => {});
-    }
-  };
-
   const switchToMode = (newMode: 'stream' | 'snapshot') => {
-    if (streamMode === newMode || transitioning) return;
-    setTransitioning(true);
-    setStreamLoading(true);
+    if (streamMode === newMode) return;
     setStreamError(false);
-    // Reset reconnect state on mode switch
     setReconnectAttempts(0);
     setIsReconnecting(false);
-    // Reset zoom on mode switch
     setZoomLevel(1);
     setPanOffset({ x: 0, y: 0 });
     if (reconnectTimerRef.current) {
@@ -408,29 +370,14 @@ export function CameraPage() {
     if (countdownIntervalRef.current) {
       clearInterval(countdownIntervalRef.current);
     }
-
-    if (imgRef.current) {
-      imgRef.current.src = '';
-    }
-
-    // Stop any active streams when switching modes
-    if (streamMode === 'stream') {
-      stopStream();
-    }
-
-    setTimeout(() => {
-      setStreamMode(newMode);
-      setImageKey(Date.now());
-      setTransitioning(false);
-    }, 100);
+    // Keep the current frame on screen until the new URL's first frame
+    // arrives — no 100ms blank, no overlapping /camera/stop.
+    setStreamMode(newMode);
+    setImageKey(Date.now());
   };
 
   const refresh = () => {
-    if (transitioning) return;
-    setTransitioning(true);
-    setStreamLoading(true);
     setStreamError(false);
-    // Reset reconnect state on manual refresh
     setReconnectAttempts(0);
     setIsReconnecting(false);
     if (reconnectTimerRef.current) {
@@ -439,20 +386,22 @@ export function CameraPage() {
     if (countdownIntervalRef.current) {
       clearInterval(countdownIntervalRef.current);
     }
+    setImageKey(Date.now());
+  };
 
-    if (imgRef.current) {
-      imgRef.current.src = '';
+  const switchCameraSource = (next: CameraSource) => {
+    if (next === selectedSource) return;
+    setSourceOverride(next);
+    setStreamError(false);
+    setReconnectAttempts(0);
+    setIsReconnecting(false);
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
     }
-
-    // Stop any active streams before refresh
-    if (streamMode === 'stream') {
-      stopStream();
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
     }
-
-    setTimeout(() => {
-      setImageKey(Date.now());
-      setTransitioning(false);
-    }, 100);
+    setImageKey(Date.now());
   };
 
   const toggleFullscreen = () => {
@@ -627,16 +576,18 @@ export function CameraPage() {
   // for the query to settle and there is one src, one request, one viewer.
   // Falling through once it has settled without a token keeps an auth-disabled
   // install working even if the token endpoint fails — it doesn't need one.
-  const waitingForStreamToken = !streamTokenValue && (authEnabled || streamTokenPending);
+  const waitingForStreamToken = !streamTokenValue && (authLoading || authEnabled || streamTokenPending);
   const appendToken = (url: string) =>
     streamTokenValue ? `${url}&token=${encodeURIComponent(streamTokenValue)}` : withStreamToken(url);
-  const currentUrl = transitioning || waitingForStreamToken
+  const sourceQuery = sourceOverride ? `&source=${encodeURIComponent(sourceOverride)}` : '';
+  const nextUrl = waitingForStreamToken
     ? ''
     : streamMode === 'stream'
-      ? appendToken(`/api/v1/printers/${id}/camera/stream?fps=${fps}&t=${imageKey}`)
-      : appendToken(`/api/v1/printers/${id}/camera/snapshot?t=${imageKey}`);
+      ? appendToken(`/api/v1/printers/${id}/camera/stream?fps=${fps}&t=${imageKey}${sourceQuery}`)
+      : appendToken(`/api/v1/printers/${id}/camera/snapshot?t=${imageKey}${sourceQuery}`);
+  const holdingPrevious = Boolean(shownUrl && nextUrl && shownUrl !== nextUrl);
 
-  const isDisabled = streamLoading || transitioning || isReconnecting;
+  const isDisabled = isReconnecting;
 
   if (!id) {
     return (
@@ -649,13 +600,12 @@ export function CameraPage() {
   return (
     <div ref={containerRef} className="min-h-screen bg-black flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-bambu-dark-secondary border-b border-bambu-dark-tertiary">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-bambu-dark-secondary border-b border-bambu-dark-tertiary">
         <h1 className="text-sm font-medium text-white flex items-center gap-2">
           <Camera className="w-4 h-4" />
           {printer?.name || `Printer ${id}`}
         </h1>
-        <div className="flex items-center gap-2">
-          {/* Mode toggle */}
+        <div className="flex flex-wrap items-center gap-2">
           <div className="flex bg-bambu-dark rounded p-0.5">
             <button
               onClick={() => switchToMode('stream')}
@@ -680,6 +630,12 @@ export function CameraPage() {
               {t('camera.snapshot')}
             </button>
           </div>
+          {hasExternalCamera && (
+            <CameraSourceSwitcher
+              selected={selectedSource}
+              onSelect={switchCameraSource}
+            />
+          )}
           <button
             onClick={() => chamberLightMutation.mutate(!status?.chamber_light)}
             disabled={!status?.connected || chamberLightMutation.isPending || !hasPermission('printers:control')}
@@ -744,7 +700,7 @@ export function CameraPage() {
         style={{ touchAction: 'none' }}
       >
         <div className="relative w-full h-full flex items-center justify-center">
-          {(streamLoading || transitioning) && !isReconnecting && (
+          {streamLoading && !shownUrl && !isReconnecting && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
               <div className="text-center">
                 <RefreshCw className="w-8 h-8 text-bambu-gray animate-spin mx-auto mb-2" />
@@ -796,19 +752,34 @@ export function CameraPage() {
               </div>
             </div>
           )}
+          {holdingPrevious && (
+            <img
+              src={shownUrl}
+              alt=""
+              aria-hidden="true"
+              className="max-w-full max-h-full object-contain select-none"
+              style={{
+                transform: `scale(${zoomLevel}) translate(${panOffset.x / zoomLevel}px, ${panOffset.y / zoomLevel}px) rotate(${printer?.camera_rotation || 0}deg)`,
+                ...(printer?.camera_rotation === 90 || printer?.camera_rotation === 270 ? { maxWidth: '100vh', maxHeight: '100vw' } : {}),
+              }}
+              draggable={false}
+            />
+          )}
           <img
             ref={imgRef}
-            key={imageKey}
-            src={currentUrl}
+            src={nextUrl}
             alt={t('camera.cameraStream')}
-            className="max-w-full max-h-full object-contain select-none"
+            className={`max-w-full max-h-full object-contain select-none ${holdingPrevious ? 'absolute inset-0 m-auto opacity-0' : ''}`}
             style={{
               transform: `scale(${zoomLevel}) translate(${panOffset.x / zoomLevel}px, ${panOffset.y / zoomLevel}px) rotate(${printer?.camera_rotation || 0}deg)`,
               ...(printer?.camera_rotation === 90 || printer?.camera_rotation === 270 ? { maxWidth: '100vh', maxHeight: '100vw' } : {}),
               cursor: zoomLevel > 1 ? (isPanning ? 'grabbing' : 'grab') : 'default',
             }}
-            onError={currentUrl ? handleStreamError : undefined}
-            onLoad={currentUrl ? handleStreamLoad : undefined}
+            onError={nextUrl ? handleStreamError : undefined}
+            onLoad={nextUrl ? () => {
+              setShownUrl(nextUrl);
+              handleStreamLoad();
+            } : undefined}
             onMouseDown={handleImageMouseDown}
             draggable={false}
           />

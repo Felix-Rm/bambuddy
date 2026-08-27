@@ -180,7 +180,10 @@ function App() {
                 {/* Login page */}
                 <Route path="/login" element={<LoginPage />} />
 
-                {/* Camera page - standalone, no layout, no WebSocket (doesn't need real-time updates) */}
+                {/* Camera page - standalone, no layout, no WebSocket. Not
+                    behind ProtectedRoute: that blocked first paint on auth
+                    hydrate. The page waits for a stream token before setting
+                    <img src>, and sessionStorage already carries the JWT. */}
                 <Route path="/camera/:printerId" element={<CameraPage />} />
 
                 {/* Stream overlay page - standalone for OBS/streaming embeds, no auth required */}
