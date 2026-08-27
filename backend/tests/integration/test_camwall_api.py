@@ -142,7 +142,9 @@ class TestCamWallFeedPayload:
             "layer_num",
             "total_layers",
             "hms_errors",
+            "has_external_camera",
         }
+        assert entry["has_external_camera"] is False
 
     async def test_disconnected_printer_reports_connected_false(self, async_client: AsyncClient, printer_row):
         """No MQTT client is running in tests, so the printer has no state at

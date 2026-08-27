@@ -65,6 +65,11 @@ async def list_camwall_printers(
             "remaining_time": None,
             "layer_num": None,
             "total_layers": None,
+            # Boolean only — the kiosk must not receive the camera URL, but
+            # the tile switcher needs to know an external source exists.
+            "has_external_camera": bool(
+                printer.external_camera_enabled and printer.external_camera_url
+            ),
             # Codes only — enough for the client to run the same
             # filterKnownHMSErrors() it uses on the authenticated wall, so the
             # error chip means the same thing in both modes.

@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, VideoOff, WifiOff } from 'lucide-react';
-import { getAuthToken, withStreamToken } from '../api/client';
+import { withStreamToken } from '../api/client';
 import { formatDuration } from '../utils/date';
+import { CameraSourceSwitcher, type CameraSource } from './CameraSourceSwitcher';
 
 export type CameraTileMode = 'live' | 'snapshot' | 'paused';
 export type CameraTileStatusMode = 'off' | 'compact' | 'full';
@@ -15,6 +16,10 @@ interface CameraTileProps {
   snapshotIntervalMs: number;
   connected: boolean;
   onClick?: () => void;
+  // When true, the tile shows Built-in / External between the status chip
+  // and the Live badge. The stream URL then carries ?source= so this pane
+  // can pick independently of other viewers.
+  hasExternalCamera?: boolean;
   // Optional status overlay — wired by CameraWall from the shared
   // ['printerStatus', id] query. All optional so existing tests don't break.
   statusMode?: CameraTileStatusMode;
@@ -65,6 +70,7 @@ export function CameraTile({
   snapshotIntervalMs,
   connected,
   onClick,
+  hasExternalCamera = false,
   statusMode = 'off',
   printerState = null,
   progress = null,
@@ -77,43 +83,16 @@ export function CameraTile({
   const { t } = useTranslation();
   const [bust, setBust] = useState(0);
   const [errored, setErrored] = useState(false);
-  const lastModeRef = useRef<CameraTileMode>(mode);
+  const [shownSrc, setShownSrc] = useState('');
+  const [sourceOverride, setSourceOverride] = useState<CameraSource | null>(null);
+  const selectedSource: CameraSource = sourceOverride ?? (hasExternalCamera ? 'external' : 'builtin');
 
-  // Tell the backend to release its MJPEG transcoder when this tile stops
-  // being live — either by unmounting or by transitioning to snapshot/paused.
-  // EmbeddedCameraViewer uses the same /camera/stop with keepalive on unmount.
+  // Closing the <img> (mode change or unmount) aborts the HTTP body; the
+  // backend drops this viewer's fan-out subscription. No /camera/stop.
   useEffect(() => {
-    const wasLive = lastModeRef.current === 'live';
-    const isLive = mode === 'live';
-    lastModeRef.current = mode;
-    if (wasLive && !isLive) {
-      const headers: Record<string, string> = {};
-      const token = getAuthToken();
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      fetch(`/api/v1/printers/${printerId}/camera/stop`, {
-        method: 'POST',
-        keepalive: true,
-        headers,
-      }).catch(() => {});
-    }
     setErrored(false);
     setBust((b) => b + 1);
   }, [mode, printerId]);
-
-  useEffect(() => {
-    return () => {
-      if (lastModeRef.current === 'live') {
-        const headers: Record<string, string> = {};
-        const token = getAuthToken();
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-        fetch(`/api/v1/printers/${printerId}/camera/stop`, {
-          method: 'POST',
-          keepalive: true,
-          headers,
-        }).catch(() => {});
-      }
-    };
-  }, [printerId]);
 
   useEffect(() => {
     if (mode !== 'snapshot') return;
@@ -121,12 +100,15 @@ export function CameraTile({
     return () => clearInterval(interval);
   }, [mode, snapshotIntervalMs]);
 
+  const sourceQuery = sourceOverride ? `&source=${encodeURIComponent(sourceOverride)}` : '';
   const liveUrl = withStreamToken(
-    `/api/v1/printers/${printerId}/camera/stream?fps=${LIVE_FPS}&t=${bust}`,
+    `/api/v1/printers/${printerId}/camera/stream?fps=${LIVE_FPS}&t=${bust}${sourceQuery}`,
   );
   const snapshotUrl = withStreamToken(
-    `/api/v1/printers/${printerId}/camera/snapshot?t=${bust}`,
+    `/api/v1/printers/${printerId}/camera/snapshot?t=${bust}${sourceQuery}`,
   );
+  const nextSrc = mode === 'live' ? liveUrl : snapshotUrl;
+  const holdingPrevious = Boolean(shownSrc && nextSrc && shownSrc !== nextSrc);
 
   // A kiosk wall passes no onClick — there is no pointer at a TV, and the page
   // is authenticated by a token that cannot open the single-camera view. Render
@@ -148,8 +130,15 @@ export function CameraTile({
   const hasRemaining = remainingMin != null && remainingMin > 0;
 
   const rootClass = `group relative aspect-video w-full overflow-hidden rounded-lg border border-bambu-dark-tertiary bg-black text-left ${
-    interactive ? 'focus:outline-none focus:ring-2 focus:ring-bambu-green' : 'cursor-default'
+    interactive ? 'cursor-pointer focus:outline-none focus:ring-2 focus:ring-bambu-green' : 'cursor-default'
   }`;
+
+  const switchCameraSource = (next: CameraSource) => {
+    if (next === selectedSource) return;
+    setSourceOverride(next);
+    setErrored(false);
+    setBust((b) => b + 1);
+  };
 
   const content = (
     <>
@@ -167,49 +156,77 @@ export function CameraTile({
           <span className="text-xs">{t('printers.camWall.noSignal')}</span>
         </div>
       ) : (
-        <img
-          key={`${mode}-${bust}`}
-          src={mode === 'live' ? liveUrl : snapshotUrl}
-          alt={printerName}
-          draggable={false}
-          loading="lazy"
-          className="h-full w-full select-none object-contain"
-          style={{ transform }}
-          onError={() => setErrored(true)}
-        />
-      )}
-
-      {/* Status chip (top-left) */}
-      {showChip && (
-        <span
-          className={`absolute left-2 top-2 flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${BUCKET_CHIP_CLASS[bucket]}`}
-        >
-          {hmsErrorCount > 0 && (
-            <AlertTriangle
-              className="h-3 w-3"
+        <>
+          {holdingPrevious && (
+            <img
+              src={shownSrc}
+              alt=""
               aria-hidden="true"
+              draggable={false}
+              className="h-full w-full select-none object-contain"
+              style={{ transform }}
             />
           )}
-          <span>{t(`printers.status.${bucket}`)}</span>
-        </span>
+          <img
+            src={nextSrc}
+            alt={printerName}
+            draggable={false}
+            className={`h-full w-full select-none object-contain ${holdingPrevious ? 'absolute inset-0 opacity-0' : ''}`}
+            style={{ transform }}
+            onError={() => {
+              if (shownSrc && shownSrc !== nextSrc) return;
+              setErrored(true);
+            }}
+            onLoad={() => setShownSrc(nextSrc)}
+          />
+        </>
       )}
 
-      {/* Mode indicator (top-right) */}
-      <span
-        className={`absolute right-2 top-2 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-          mode === 'live'
-            ? 'bg-red-500/80 text-white'
-            : mode === 'snapshot'
-              ? 'bg-amber-500/70 text-black'
-              : 'bg-bambu-dark-tertiary/70 text-bambu-gray'
-        }`}
-      >
-        {mode === 'live'
-          ? t('printers.camWall.live')
-          : mode === 'snapshot'
-            ? t('printers.camWall.snap')
-            : t('printers.camWall.off')}
-      </span>
+      {/* Top overlay: status | Built-in/External | Live. Grid keeps the
+          source switcher between the two badges even when the chip is hidden. */}
+      <div className="pointer-events-none absolute inset-x-2 top-2 z-20 grid grid-cols-3 items-center gap-1">
+        <div className="justify-self-start">
+          {showChip && (
+            <span
+              className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${BUCKET_CHIP_CLASS[bucket]}`}
+            >
+              {hmsErrorCount > 0 && (
+                <AlertTriangle
+                  className="h-3 w-3"
+                  aria-hidden="true"
+                />
+              )}
+              <span>{t(`printers.status.${bucket}`)}</span>
+            </span>
+          )}
+        </div>
+        <div className="pointer-events-auto justify-self-center">
+          {hasExternalCamera && (
+            <CameraSourceSwitcher
+              size="compact"
+              selected={selectedSource}
+              onSelect={switchCameraSource}
+            />
+          )}
+        </div>
+        <div className="justify-self-end">
+          <span
+            className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+              mode === 'live'
+                ? 'bg-red-500/80 text-white'
+                : mode === 'snapshot'
+                  ? 'bg-amber-500/70 text-black'
+                  : 'bg-bambu-dark-tertiary/70 text-bambu-gray'
+            }`}
+          >
+            {mode === 'live'
+              ? t('printers.camWall.live')
+              : mode === 'snapshot'
+                ? t('printers.camWall.snap')
+                : t('printers.camWall.off')}
+          </span>
+        </div>
+      </div>
 
       {/* Bottom overlay: name + (when full) print info */}
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/55 to-transparent px-2 pb-1.5 pt-3 text-white">
@@ -247,6 +264,13 @@ export function CameraTile({
     </>
   );
 
+  const handleActivate = (e: { target: EventTarget | null; preventDefault?: () => void }) => {
+    const target = e.target as HTMLElement | null;
+    if (target?.closest('[data-camera-source-switcher]')) return;
+    e.preventDefault?.();
+    onClick?.();
+  };
+
   if (!interactive) {
     return (
       <div className={rootClass} title={printerName}>
@@ -255,9 +279,21 @@ export function CameraTile({
     );
   }
 
+  // A <div role="button"> rather than <button>: the source switcher has its
+  // own buttons, and those cannot nest inside another button.
   return (
-    <button type="button" onClick={onClick} className={rootClass} title={printerName}>
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={handleActivate}
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        handleActivate(e);
+      }}
+      className={rootClass}
+      title={printerName}
+    >
       {content}
-    </button>
+    </div>
   );
 }

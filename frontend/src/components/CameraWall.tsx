@@ -5,6 +5,7 @@ import { Settings as SettingsIcon } from 'lucide-react';
 import { CameraTile, type CameraTileMode, type CameraTileStatusMode } from './CameraTile';
 import { filterKnownHMSErrors } from './HMSErrorModal';
 import { api, type PrinterStatus } from '../api/client';
+import { printerHasExternalCamera } from './CameraSourceSwitcher';
 
 // The wall only ever reads these three fields off a printer, so it asks for no
 // more than that. Printer[] satisfies this structurally, and so does the
@@ -14,6 +15,10 @@ export interface CameraWallPrinter {
   id: number;
   name: string;
   camera_rotation?: number;
+  external_camera_enabled?: boolean;
+  external_camera_url?: string | null;
+  // Kiosk feed omits the URL; this flag is enough to show the switcher.
+  has_external_camera?: boolean;
 }
 
 // What a tile draws from a printer's status. PrinterStatus satisfies it; so
@@ -289,6 +294,7 @@ export function CameraWall({
                 mode={mode}
                 snapshotIntervalMs={snapshotIntervalSec * 1000}
                 connected={statusByPrinter.get(p.id)?.connected ?? false}
+                hasExternalCamera={printerHasExternalCamera(p) || Boolean(p.has_external_camera)}
                 statusMode={statusMode}
                 printerState={statusByPrinter.get(p.id)?.state ?? null}
                 progress={statusByPrinter.get(p.id)?.progress ?? null}

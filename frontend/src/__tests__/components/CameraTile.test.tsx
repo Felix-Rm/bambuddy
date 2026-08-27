@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, screen } from '@testing-library/react';
+import { act, fireEvent, screen } from '@testing-library/react';
 import { render } from '../utils';
 import { CameraTile } from '../../components/CameraTile';
 
@@ -90,7 +90,7 @@ describe('CameraTile', () => {
     expect(screen.queryByAltText('H2D-Booth')).toBeNull();
   });
 
-  it('POSTs /camera/stop when leaving live mode', async () => {
+  it('does not POST /camera/stop when leaving live mode', async () => {
     const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValue(
       new Response(null, { status: 200 }),
     );
@@ -121,6 +121,51 @@ describe('CameraTile', () => {
     const stopCalls = fetchMock.mock.calls.filter(([url]) =>
       String(url).includes('/api/v1/printers/11/camera/stop'),
     );
-    expect(stopCalls.length).toBeGreaterThan(0);
+    expect(stopCalls).toHaveLength(0);
+  });
+
+  it('places the source switcher between the status chip and the live badge', async () => {
+    render(
+      <CameraTile
+        printerId={5}
+        printerName="P1S-Booth"
+        mode="live"
+        snapshotIntervalMs={5000}
+        connected
+        hasExternalCamera
+        statusMode="compact"
+        printerState="RUNNING"
+      />,
+    );
+    await flushMicrotasks();
+
+    expect(screen.getByRole('button', { name: 'Built-in' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'External' })).toBeInTheDocument();
+    expect(screen.getByText('Printing')).toBeInTheDocument();
+    expect(screen.getByText('Live')).toBeInTheDocument();
+  });
+
+  it('switches the tile stream to source=builtin without opening the tile', async () => {
+    const onClick = vi.fn();
+    render(
+      <CameraTile
+        printerId={5}
+        printerName="P1S-Booth"
+        mode="live"
+        snapshotIntervalMs={5000}
+        connected
+        hasExternalCamera
+        onClick={onClick}
+      />,
+    );
+    await flushMicrotasks();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Built-in' }));
+    });
+
+    const srcs = [...document.querySelectorAll('img')].map((el) => (el as HTMLImageElement).src);
+    expect(srcs.some((src) => src.includes('source=builtin'))).toBe(true);
+    expect(onClick).not.toHaveBeenCalled();
   });
 });
