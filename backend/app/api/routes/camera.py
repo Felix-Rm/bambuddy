@@ -166,6 +166,47 @@ async def get_printer_or_404(printer_id: int, db: AsyncSession) -> Printer:
     return printer
 
 
+def _printer_has_external_camera(printer: Printer) -> bool:
+    return bool(printer.external_camera_enabled and printer.external_camera_url)
+
+
+def _resolve_live_camera_source(printer: Printer, source: str | None) -> str:
+    """Pick ``external`` or ``builtin`` for a live/snapshot request.
+
+    Each source has its own fan-out: viewers of the same source share one
+    upstream, and that upstream is torn down only when it has no subscribers.
+    Switching cameras unsubscribes from one fan-out and subscribes to the
+    other — it does not kill a feed someone else is still watching.
+    When ``source`` is omitted, follow the printer's external-camera setting
+    so existing clients keep their current behaviour.
+    """
+    requested = (source or "").strip().lower()
+    has_external = _printer_has_external_camera(printer)
+    if requested in {"builtin", "built-in", "internal"}:
+        return "builtin"
+    if requested == "external":
+        return "external" if has_external else "builtin"
+    return "external" if has_external else "builtin"
+
+
+def _fanout_key(printer_id: int, source: str) -> str:
+    """Broadcaster registry key. Built-in keeps ``printer-{id}`` so existing
+    subscribers (cam-wall, older clients) still share that upstream.
+    """
+    if source == "external":
+        return f"printer-{printer_id}-external"
+    return f"printer-{printer_id}"
+
+
+def _parse_stop_sources(source: str | None) -> list[str]:
+    requested = (source or "").strip().lower()
+    if requested in {"builtin", "built-in", "internal"}:
+        return ["builtin"]
+    if requested == "external":
+        return ["external"]
+    return ["builtin", "external"]
+
+
 async def generate_chamber_mjpeg_stream(
     ip_address: str,
     access_code: str,
@@ -841,11 +882,71 @@ async def create_stream_token(
     return {"token": await create_camera_stream_token()}
 
 
+async def _attach_fanout_stream(
+    request: Request,
+    fanout_key: str,
+    factory,
+) -> StreamingResponse:
+    """Subscribe this HTTP client to a shared MJPEG upstream.
+
+    The reference count is this generator's lifetime. Subscribe happens when
+    the ASGI server starts sending the body; unsubscribe happens in
+    ``finally`` when the client drops, the task is cancelled, or the upstream
+    ends. ``POST /camera/stop`` is not part of this path.
+    """
+
+    async def _is_disconnected() -> bool:
+        try:
+            return await request.is_disconnected()
+        except Exception:
+            return True
+
+    def _log_detach(remaining: int) -> None:
+        logger.info("Camera viewer detached from %s (subscribers=%d)", fanout_key, remaining)
+
+    async def _generate():
+        broadcaster: MjpegBroadcaster = await get_or_create_broadcaster(fanout_key, factory)
+        try:
+            queue = await broadcaster.subscribe()
+        except RuntimeError:
+            broadcaster = await get_or_create_broadcaster(fanout_key, factory)
+            queue = await broadcaster.subscribe()
+        logger.info(
+            "Camera viewer attached to %s (subscribers=%d)",
+            fanout_key,
+            broadcaster.subscriber_count,
+        )
+        try:
+            async for chunk in iter_subscriber(
+                broadcaster,
+                queue,
+                is_disconnected=_is_disconnected,
+                on_unsubscribe=_log_detach,
+            ):
+                yield chunk
+        finally:
+            # Belt and braces: iter_subscriber unsubscribes itself, but if this
+            # task is cancelled between subscribe() and the first anext, that
+            # finally would not have run. unsubscribe() is idempotent.
+            await broadcaster.unsubscribe(queue)
+
+    return StreamingResponse(
+        _generate(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
 @router.get("/{printer_id}/camera/stream")
 async def camera_stream(
     printer_id: int,
     request: Request,
     fps: int = 10,
+    source: str | None = None,
     _: None = RequireCameraStreamTokenIfAuthEnabled,
 ):
     """Stream live video from printer camera as MJPEG.
@@ -860,9 +961,14 @@ async def camera_stream(
     - A1/P1: Chamber image protocol (port 6000)
     - X1/H2/P2: RTSP via ffmpeg (port 322)
 
+    Pass ``source=builtin`` or ``source=external`` to override the printer's
+    external-camera setting for this request only. The unused feed is not
+    started — switch by stopping the current stream and opening a new one.
+
     Args:
         printer_id: Printer ID
         fps: Target frames per second (default: 10, max: 30)
+        source: Optional ``builtin`` / ``external`` override
     """
     # Fetch the printer in a short-lived session so the pooled DB connection is
     # released BEFORE we start streaming. A live MJPEG stream runs for as long
@@ -881,8 +987,8 @@ async def camera_stream(
     async with database.async_session() as db:
         printer = await get_printer_or_404(printer_id, db)
 
-    # Check for external camera first
-    if printer.external_camera_enabled and printer.external_camera_url:
+    # Check for external camera first (unless the viewer asked for builtin)
+    if _resolve_live_camera_source(printer, source) == "external":
         # NB: no `import time` / `import uuid` here, and don't reintroduce them.
         # A local import anywhere in this function makes the name function-local
         # for the WHOLE function, so the RTSP/chamber path below — which never
@@ -896,22 +1002,12 @@ async def camera_stream(
             "Using external camera (%s) for printer %s at %s fps", printer.external_camera_type, printer_id, fps
         )
 
-        # Register the stream into the SAME registries the RTSP/chamber paths use
-        # (#2675) so `/camera/stop` and cleanup_orphaned_streams can find and kill
-        # a leaked ffmpeg holding a USB device open. Before this, external streams
-        # only tracked _active_external_streams and were structurally invisible to
-        # both the stop endpoint and the janitor. The stream_id keeps the
-        # `{printer_id}-` prefix both scanners key on, plus a unique suffix so two
-        # concurrent viewers of one printer don't clobber each other's entry.
+        # Same fan-out as built-in: one upstream per printer+source, shared by
+        # every viewer. Membership is the live HTTP connection — a dropped
+        # client is unsubscribed when this generator is cancelled, not when
+        # the frontend remembers to POST /camera/stop.
+        fanout_key = _fanout_key(printer_id, "external")
         stream_id = f"{printer_id}-ext-{uuid.uuid4().hex[:8]}"
-        stop_event = asyncio.Event()
-        _disconnect_events[stream_id] = stop_event
-        # Track stream start
-        _stream_start_times[printer_id] = time.time()
-        _active_external_streams.add(printer_id)
-
-        # Mutable holder so the wrapper's finally can unregister whatever process
-        # is currently registered (the RTSP path may respawn across reconnects).
         current_proc: dict[str, asyncio.subprocess.Process] = {}
 
         def _register_external_process(proc: asyncio.subprocess.Process) -> None:
@@ -935,51 +1031,38 @@ async def camera_stream(
             """
             _last_frames[printer_id] = frame
 
-        async def external_stream_wrapper():
-            """Wrap external stream to track start/stop and update frame times."""
-            try:
-                async for frame in generate_mjpeg_stream(
-                    printer.external_camera_url,
-                    printer.external_camera_type,
-                    fps,
-                    on_process=_register_external_process,
-                    on_frame=_publish_external_frame,
-                    stop_event=stop_event,
-                ):
-                    # generate_mjpeg_stream already handles rate limiting;
-                    # track frame times (per-printer + per-stream) for stall detection
-                    now = time.time()
-                    _last_frame_times[printer_id] = now
-                    _stream_last_frame_times[stream_id] = now
-                    yield frame
-            finally:
-                # Best-effort unregister. If an abrupt disconnect skips this
-                # finally, the registry entries persist — which is exactly what
-                # lets the stop endpoint / janitor reap the leaked process.
-                stop_event.set()
-                proc = current_proc.get("proc")
-                if proc is not None:
-                    _spawned_ffmpeg_pids.pop(proc.pid, None)
-                _active_streams.pop(stream_id, None)
-                _disconnect_events.pop(stream_id, None)
-                _stream_last_frame_times.pop(stream_id, None)
-                _active_external_streams.discard(printer_id)
-                # Now that this path publishes a buffered frame, it has to
-                # retract it too — ownership-checked, so a concurrent viewer of
-                # the same printer keeps its own. Also clears the per-printer
-                # timings this path used to leave behind.
-                _release_printer_frame_state(printer_id)
-                logger.info("External camera stream ended for printer %s", printer_id)
+        def _external_factory(disconnect_event: asyncio.Event):
+            async def _upstream():
+                _disconnect_events[stream_id] = disconnect_event
+                _stream_start_times.setdefault(printer_id, time.time())
+                _active_external_streams.add(printer_id)
+                try:
+                    async for frame in generate_mjpeg_stream(
+                        printer.external_camera_url,
+                        printer.external_camera_type,
+                        fps,
+                        on_process=_register_external_process,
+                        on_frame=_publish_external_frame,
+                        stop_event=disconnect_event,
+                    ):
+                        now = time.time()
+                        _last_frame_times[printer_id] = now
+                        _stream_last_frame_times[stream_id] = now
+                        yield frame
+                finally:
+                    proc = current_proc.get("proc")
+                    if proc is not None:
+                        _spawned_ffmpeg_pids.pop(proc.pid, None)
+                    _active_streams.pop(stream_id, None)
+                    _disconnect_events.pop(stream_id, None)
+                    _stream_last_frame_times.pop(stream_id, None)
+                    _active_external_streams.discard(printer_id)
+                    _release_printer_frame_state(printer_id)
+                    logger.info("External camera stream ended for printer %s", printer_id)
 
-        return StreamingResponse(
-            external_stream_wrapper(),
-            media_type="multipart/x-mixed-replace; boundary=frame",
-            headers={
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache",
-                "Expires": "0",
-            },
-        )
+            return _upstream()
+
+        return await _attach_fanout_stream(request, fanout_key, _external_factory)
 
     # Validate FPS - A1/P1 models max out at ~5 FPS
     if is_chamber_image_model(printer.model):
@@ -1011,7 +1094,7 @@ async def camera_stream(
     # Note: the upstream's fps is fixed by the first viewer who creates the
     # broadcaster. Concurrent viewers share that rate; new viewers after
     # teardown create a fresh broadcaster at their requested fps.
-    fanout_key = f"printer-{printer_id}"
+    fanout_key = _fanout_key(printer_id, "builtin")
     upstream_stream_id = _new_fanout_stream_id(printer_id)
 
     def _factory(disconnect_event: asyncio.Event):
@@ -1028,143 +1111,146 @@ async def camera_stream(
             printer_id=printer_id,
         )
 
-    # Subscribe with a one-shot retry to close a tiny race: the grace-window
-    # teardown can flip the broadcaster to `stopped=True` between the registry
-    # lookup and our subscribe call. The retry forces the registry to mint a
-    # fresh broadcaster (since the now-stopped one is replaced), and the second
-    # subscribe is guaranteed to land on it before any teardown can fire.
-    broadcaster: MjpegBroadcaster = await get_or_create_broadcaster(fanout_key, _factory)
-    try:
-        queue = await broadcaster.subscribe()
-    except RuntimeError:
-        broadcaster = await get_or_create_broadcaster(fanout_key, _factory)
-        queue = await broadcaster.subscribe()
-    logger.info(
-        "Camera viewer attached to %s (subscribers=%d)",
-        fanout_key,
-        broadcaster.subscriber_count,
-    )
-
-    async def _is_disconnected() -> bool:
-        try:
-            return await request.is_disconnected()
-        except Exception:
-            # Older starlette/uvicorn can raise during teardown — treat that
-            # as "client gone" so the subscriber cleanly unsubscribes.
-            return True
-
-    def _log_detach(remaining: int) -> None:
-        logger.info("Camera viewer detached from %s (subscribers=%d)", fanout_key, remaining)
-
-    async def _generate():
-        async for chunk in iter_subscriber(
-            broadcaster,
-            queue,
-            is_disconnected=_is_disconnected,
-            on_unsubscribe=_log_detach,
-        ):
-            yield chunk
-
-    return StreamingResponse(
-        _generate(),
-        media_type="multipart/x-mixed-replace; boundary=frame",
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        },
-    )
+    return await _attach_fanout_stream(request, fanout_key, _factory)
 
 
-@router.api_route("/{printer_id}/camera/stop", methods=["GET", "POST"])
-async def stop_camera_stream(
+async def _stop_registered_ffmpeg(
     printer_id: int,
-    _: User | None = RequirePermissionIfAuthEnabled(Permission.CAMERA_VIEW),
-):
-    """Stop active camera streams for a printer.
+    *,
+    infix: str | None = None,
+    exclude_infix: str | None = None,
+) -> int:
+    """Terminate ffmpeg processes registered for ``printer_id``.
 
-    Called by the frontend on viewer unmount (cam-wall tile, embedded viewer,
-    popup window). Accepts both GET and POST (POST for sendBeacon compatibility).
-
-    Reference-count guard: every viewer of a printer subscribes to the same
-    fan-out broadcaster, so a force-shutdown triggered by ONE leaving viewer
-    used to kill the others' streams (cam-wall tile froze when a user opened
-    then closed the embedded viewer). If any subscriber is still attached,
-    skip the force-teardown — the broadcaster's natural grace-shutdown (5 s
-    after subscribers drop to 0) handles cleanup when the leaving viewer's
-    HTTP connection actually closes.
+    Stream ids are ``{printer_id}-…``. ``infix="-ext-"`` reaps only the
+    external-camera process; ``exclude_infix="-ext-"`` leaves it alone.
     """
-    broadcaster_key = f"printer-{printer_id}"
-    remaining_subscribers = get_subscriber_count(broadcaster_key)
-    if remaining_subscribers >= 1:
-        logger.info(
-            "Skipping force-shutdown for printer %s: %d subscriber(s) still attached; "
-            "natural cleanup will tear down when last viewer disconnects",
-            printer_id,
-            remaining_subscribers,
-        )
-        return {"stopped": 0, "skipped": True}
+    prefix = f"{printer_id}-"
+
+    def _match(stream_id: str) -> bool:
+        if not stream_id.startswith(prefix):
+            return False
+        if infix is not None and infix not in stream_id:
+            return False
+        if exclude_infix is not None and exclude_infix in stream_id:
+            return False
+        return True
 
     stopped = 0
-
-    # Tear down the fan-out broadcaster first (#1089). This cleanly notifies
-    # all subscribed viewers and asks the upstream generator to stop
-    # reconnecting before we fall back to forcefully killing the process below.
-    if await shutdown_broadcaster(broadcaster_key):
-        logger.info("Shut down camera fan-out broadcaster for printer %s", printer_id)
-
-    # Stop ffmpeg/RTSP streams
-    to_remove = []
+    to_remove: list[str] = []
+    for stream_id, event in list(_disconnect_events.items()):
+        if _match(stream_id):
+            event.set()
     for stream_id, process in list(_active_streams.items()):
-        if stream_id.startswith(f"{printer_id}-"):
-            to_remove.append(stream_id)
-            # Signal the generator to stop reconnecting BEFORE killing the process
-            event = _disconnect_events.get(stream_id)
-            if event:
-                event.set()
-            if process.returncode is None:
-                # Shared helper, not an inline copy: it bounds the post-kill
-                # wait (#2580) — a killed-but-unreaped ffmpeg used to hang this
-                # request forever, exactly when the user hit Stop to recover a
-                # stuck stream.
-                await _terminate_ffmpeg(process, stream_id)
-                stopped += 1
-                logger.info("Terminated ffmpeg process for stream %s", stream_id)
-            _spawned_ffmpeg_pids.pop(process.pid, None)
+        if not _match(stream_id):
+            continue
+        to_remove.append(stream_id)
+        event = _disconnect_events.get(stream_id)
+        if event:
+            event.set()
+        if process.returncode is None:
+            await _terminate_ffmpeg(process, stream_id)
+            stopped += 1
+            logger.info("Terminated ffmpeg process for stream %s", stream_id)
+        _spawned_ffmpeg_pids.pop(process.pid, None)
 
     for stream_id in to_remove:
         _active_streams.pop(stream_id, None)
         _disconnect_events.pop(stream_id, None)
         _stream_last_frame_times.pop(stream_id, None)
 
-    # Stop chamber image streams
-    to_remove_chamber = []
+    if infix == "-ext-" or (infix is None and exclude_infix is None):
+        _active_external_streams.discard(printer_id)
+
+    return stopped
+
+
+async def _stop_chamber_streams(printer_id: int) -> int:
+    stopped = 0
+    to_remove_chamber: list[str] = []
     for stream_id, (_reader, writer) in list(_active_chamber_streams.items()):
-        if stream_id.startswith(f"{printer_id}-"):
-            to_remove_chamber.append(stream_id)
-            # Signal the generator to stop
-            event = _disconnect_events.get(stream_id)
-            if event:
-                event.set()
-            try:
-                writer.close()
-                stopped += 1
-                logger.info("Closed chamber image connection for stream %s", stream_id)
-            except OSError as e:
-                logger.warning("Error stopping chamber stream %s: %s", stream_id, e)
+        if not stream_id.startswith(f"{printer_id}-"):
+            continue
+        to_remove_chamber.append(stream_id)
+        event = _disconnect_events.get(stream_id)
+        if event:
+            event.set()
+        try:
+            writer.close()
+            stopped += 1
+            logger.info("Closed chamber image connection for stream %s", stream_id)
+        except OSError as e:
+            logger.warning("Error stopping chamber stream %s: %s", stream_id, e)
 
     for stream_id in to_remove_chamber:
         _active_chamber_streams.pop(stream_id, None)
         _disconnect_events.pop(stream_id, None)
         _stream_last_frame_times.pop(stream_id, None)
+    return stopped
 
-    logger.info("Stopped %s camera stream(s) for printer %s", stopped, printer_id)
-    return {"stopped": stopped}
+
+async def _stop_source_if_idle(printer_id: int, source: str) -> tuple[int, bool]:
+    """Tear down one camera source only when it has no live HTTP subscribers.
+
+    Returns ``(stopped_count, skipped)``. ``skipped`` is True when another
+    viewer is still attached — their connection is the reference count, not
+    a frontend /camera/stop call.
+    """
+    key = _fanout_key(printer_id, source)
+    remaining = get_subscriber_count(key)
+    if remaining >= 1:
+        logger.info(
+            "Skipping shutdown of %s: %d subscriber(s) still attached; "
+            "natural cleanup will tear down when the last HTTP connection closes",
+            key,
+            remaining,
+        )
+        return 0, True
+
+    stopped = 0
+    if await shutdown_broadcaster(key):
+        stopped += 1
+        logger.info("Shut down camera fan-out broadcaster %s", key)
+    if source == "external":
+        stopped += await _stop_registered_ffmpeg(printer_id, infix="-ext-")
+    else:
+        stopped += await _stop_registered_ffmpeg(printer_id, exclude_infix="-ext-")
+        stopped += await _stop_chamber_streams(printer_id)
+    return stopped, False
+
+
+@router.api_route("/{printer_id}/camera/stop", methods=["GET", "POST"])
+async def stop_camera_stream(
+    printer_id: int,
+    source: str | None = None,
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.CAMERA_VIEW),
+):
+    """Optional fast-path stop. Not required for cleanup.
+
+    Live membership is the HTTP MJPEG connection: if a browser tab crashes or
+    the network drops, Starlette cancels that generator, ``iter_subscriber``
+    unsubscribes in ``finally``, and the upstream tears down after the grace
+    window when the count hits zero. This endpoint only speeds that up for
+    clients that *do* send it, and it must never kill a source that still has
+    subscribers.
+
+    Pass ``source=builtin`` or ``source=external`` to target one feed. Omitted
+    source considers both independently.
+    """
+    stopped = 0
+    skipped = False
+    for src in _parse_stop_sources(source):
+        n, was_skipped = await _stop_source_if_idle(printer_id, src)
+        stopped += n
+        skipped = skipped or was_skipped
+    logger.info("Stopped %s camera stream(s) for printer %s (skipped=%s)", stopped, printer_id, skipped)
+    return {"stopped": stopped, "skipped": skipped}
 
 
 @router.get("/{printer_id}/camera/snapshot")
 async def camera_snapshot(
     printer_id: int,
+    source: str | None = None,
     _: None = RequireCameraStreamTokenIfAuthEnabled,
 ):
     """Capture a single frame from the printer camera.
@@ -1172,6 +1258,9 @@ async def camera_snapshot(
     Returns a JPEG image.
 
     Requires a stream token query param (?token=xxx) when auth is enabled.
+
+    Pass ``source=builtin`` or ``source=external`` to override the printer's
+    external-camera setting for this request only.
     """
     import tempfile
     from pathlib import Path
@@ -1186,8 +1275,8 @@ async def camera_snapshot(
     async with database.async_session() as db:
         printer = await get_printer_or_404(printer_id, db)
 
-    # Check for external camera first
-    if printer.external_camera_enabled and printer.external_camera_url:
+    # Check for external camera first (unless the viewer asked for builtin)
+    if _resolve_live_camera_source(printer, source) == "external":
         from backend.app.services.external_camera import capture_frame
 
         frame_data = await capture_frame(

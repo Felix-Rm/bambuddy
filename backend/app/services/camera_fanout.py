@@ -356,7 +356,9 @@ async def iter_subscriber(
 ) -> AsyncGenerator[bytes, None]:
     """Yield chunks from a subscriber queue until upstream ends or client leaves.
 
-    Always unsubscribes from the broadcaster on exit, even on cancellation.
+    Always unsubscribes from the broadcaster on exit — cancellation,
+    GeneratorExit, disconnect poll, or upstream gone. A dropped TCP client
+    therefore decrements the count without any ``/camera/stop`` call.
     The optional ``on_unsubscribe`` callback receives the post-unsubscribe
     subscriber count — useful for accurate detach-log lines that don't race
     with concurrent unsubscribes.

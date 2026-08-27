@@ -7,6 +7,7 @@ generator and assert subscriber/pump lifecycle behaviour.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import AsyncGenerator
 
 import pytest
@@ -582,5 +583,67 @@ async def test_subscriber_with_no_frames_detaches_promptly():
 
     # Must notice well inside the old 30 s idle timeout.
     await asyncio.wait_for(drain(), timeout=3.0)
+    assert bc.subscriber_count == 0
+    await bc.force_shutdown()
+
+
+async def test_cancelled_subscriber_unsubscribes_without_stop():
+    """A dropped HTTP client must leave the count. No /camera/stop involved.
+
+    Cancelling the subscriber generator is what Starlette does when the TCP
+    connection dies (tab crash, Wi-Fi drop, img.src change).
+    """
+    keep_going = asyncio.Event()
+
+    async def factory(disconnect: asyncio.Event) -> AsyncGenerator[bytes, None]:
+        while not disconnect.is_set() and not keep_going.is_set():
+            yield b"frame"
+            await asyncio.sleep(0.01)
+
+    bc = MjpegBroadcaster("p1", factory)
+    queue = await bc.subscribe()
+    assert bc.subscriber_count == 1
+
+    async def drain():
+        async for _chunk in iter_subscriber(bc, queue):
+            pass
+
+    task = asyncio.create_task(drain())
+    await asyncio.sleep(0.03)
+    assert bc.subscriber_count == 1
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    assert bc.subscriber_count == 0
+    keep_going.set()
+    await bc.force_shutdown()
+
+
+async def test_cancelling_one_subscriber_leaves_the_other():
+    """Two viewers share one upstream; one dropping must not tear it down."""
+    async def factory(disconnect: asyncio.Event) -> AsyncGenerator[bytes, None]:
+        while not disconnect.is_set():
+            yield b"frame"
+            await asyncio.sleep(0.01)
+
+    bc = MjpegBroadcaster("p1", factory)
+    q1 = await bc.subscribe()
+    q2 = await bc.subscribe()
+    assert bc.subscriber_count == 2
+
+    async def drain(queue):
+        async for _chunk in iter_subscriber(bc, queue):
+            pass
+
+    t1 = asyncio.create_task(drain(q1))
+    t2 = asyncio.create_task(drain(q2))
+    await asyncio.sleep(0.03)
+    t1.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await t1
+    assert bc.subscriber_count == 1
+    t2.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await t2
     assert bc.subscriber_count == 0
     await bc.force_shutdown()

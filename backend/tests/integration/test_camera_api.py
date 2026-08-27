@@ -145,7 +145,9 @@ class TestCameraAPI:
             response = await async_client.post(f"/api/v1/printers/{printer.id}/camera/stop")
 
         assert response.status_code == 200
-        mock_shutdown.assert_awaited_once_with(f"printer-{printer.id}")
+        assert mock_shutdown.await_count == 2
+        mock_shutdown.assert_any_await(f"printer-{printer.id}")
+        mock_shutdown.assert_any_await(f"printer-{printer.id}-external")
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -179,6 +181,90 @@ class TestCameraAPI:
         assert result.get("skipped") is True
         mock_shutdown.assert_not_awaited()
         mock_process.terminate.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_stop_skips_idle_check_per_source(
+        self, async_client: AsyncClient, printer_factory
+    ):
+        """Built-in subscribers must not cause /camera/stop to kill a live
+        external fan-out, and an idle external source can still be reaped.
+        """
+        printer = await printer_factory()
+
+        mock_shutdown = AsyncMock(return_value=True)
+        mock_builtin = MagicMock()
+        mock_builtin.returncode = None
+        mock_builtin.pid = 88887
+        mock_builtin.terminate = MagicMock()
+        mock_builtin.wait = AsyncMock()
+        mock_builtin.stdout = None
+        mock_builtin.stderr = None
+
+        mock_external = MagicMock()
+        mock_external.returncode = None
+        mock_external.pid = 88886
+        mock_external.terminate = MagicMock()
+        mock_external.wait = AsyncMock()
+        mock_external.stdout = None
+        mock_external.stderr = None
+
+        def fake_count(key: str) -> int:
+            return 0 if str(key).endswith("-external") else 1
+
+        with (
+            patch("backend.app.api.routes.camera.get_subscriber_count", side_effect=fake_count),
+            patch("backend.app.api.routes.camera.shutdown_broadcaster", mock_shutdown),
+            patch(
+                "backend.app.api.routes.camera._active_streams",
+                {
+                    f"{printer.id}-fanout-deadbeef": mock_builtin,
+                    f"{printer.id}-ext-abcd1234": mock_external,
+                },
+            ),
+        ):
+            response = await async_client.post(f"/api/v1/printers/{printer.id}/camera/stop")
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result.get("skipped") is True
+        mock_shutdown.assert_awaited_once_with(f"printer-{printer.id}-external")
+        mock_builtin.terminate.assert_not_called()
+        mock_external.terminate.assert_called_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_stop_does_not_kill_external_while_it_has_subscribers(
+        self, async_client: AsyncClient, printer_factory
+    ):
+        """A second user still watching External must keep that upstream."""
+        printer = await printer_factory()
+
+        mock_shutdown = AsyncMock(return_value=True)
+        mock_external = MagicMock()
+        mock_external.returncode = None
+        mock_external.pid = 88885
+        mock_external.terminate = MagicMock()
+        mock_external.wait = AsyncMock()
+        mock_external.stdout = None
+        mock_external.stderr = None
+
+        with (
+            patch("backend.app.api.routes.camera.get_subscriber_count", return_value=1),
+            patch("backend.app.api.routes.camera.shutdown_broadcaster", mock_shutdown),
+            patch(
+                "backend.app.api.routes.camera._active_streams",
+                {f"{printer.id}-ext-abcd1234": mock_external},
+            ),
+        ):
+            response = await async_client.post(f"/api/v1/printers/{printer.id}/camera/stop")
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result.get("skipped") is True
+        assert result["stopped"] == 0
+        mock_shutdown.assert_not_awaited()
+        mock_external.terminate.assert_not_called()
 
     # ========================================================================
     # Camera Test Endpoint
@@ -393,6 +479,63 @@ class TestCameraAPI:
 
         assert response.status_code == 503
         assert "external camera" in response.json()["detail"].lower()
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_camera_snapshot_source_builtin_skips_external(self, async_client: AsyncClient, printer_factory):
+        """source=builtin must capture from the built-in camera even when an
+        external camera is enabled — the viewer switcher depends on this."""
+        printer = await printer_factory(
+            external_camera_enabled=True,
+            external_camera_url="http://192.168.1.50/mjpeg",
+            external_camera_type="mjpeg",
+        )
+
+        fake_jpeg = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+
+        with (
+            patch(
+                "backend.app.services.external_camera.capture_frame",
+                new_callable=AsyncMock,
+            ) as mock_ext,
+            patch(
+                "backend.app.api.routes.camera.try_get_active_buffered_frame",
+                return_value=fake_jpeg,
+            ),
+        ):
+            response = await async_client.get(
+                f"/api/v1/printers/{printer.id}/camera/snapshot",
+                params={"source": "builtin"},
+            )
+
+        mock_ext.assert_not_called()
+        assert response.status_code == 200
+        assert response.content == fake_jpeg
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_camera_stream_source_builtin_skips_external(self, async_client: AsyncClient, printer_factory):
+        """source=builtin must not start the external MJPEG generator."""
+        printer = await printer_factory(
+            external_camera_enabled=True,
+            external_camera_url="http://192.168.1.50/mjpeg",
+            external_camera_type="mjpeg",
+        )
+
+        with (
+            patch("backend.app.api.routes.camera.get_ffmpeg_path", return_value=None),
+            patch(
+                "backend.app.services.external_camera.generate_mjpeg_stream",
+                new_callable=AsyncMock,
+            ) as mock_ext,
+        ):
+            response = await async_client.get(
+                f"/api/v1/printers/{printer.id}/camera/stream",
+                params={"source": "builtin"},
+            )
+
+        mock_ext.assert_not_called()
+        assert response.status_code == 200
 
     # ========================================================================
     # Camera Stream Endpoint
