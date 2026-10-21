@@ -183,7 +183,7 @@ export function CamWallPage() {
   }
 
   return (
-    <div className="min-h-screen bg-bambu-dark p-4">
+    <div className="box-border flex h-dvh flex-col overflow-hidden bg-bambu-dark p-4">
       <CameraWall
         printers={printers}
         maxLive={maxLive}

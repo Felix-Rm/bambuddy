@@ -313,7 +313,10 @@ export function CameraTile({
   const hasLayers = layerNum != null && totalLayers != null && totalLayers > 0;
   const hasRemaining = remainingMin != null && remainingMin > 0;
 
-  const rootClass = `group relative aspect-video w-full overflow-hidden rounded-lg border border-bambu-dark-tertiary bg-black text-left ${
+  // CameraWall sizes the cell for a best-fit packing (h-full/w-full fill it).
+  // aspect-video remains as a fallback when the tile is rendered without a
+  // sized parent (unit tests, or a host that has not measured yet).
+  const rootClass = `group relative aspect-video h-full w-full overflow-hidden rounded-lg border border-bambu-dark-tertiary bg-black text-left ${
     interactive ? 'cursor-pointer focus:outline-none focus:ring-2 focus:ring-bambu-green' : 'cursor-default'
   }`;
 
