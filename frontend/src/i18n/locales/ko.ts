@@ -114,6 +114,7 @@ export default {
     unknownError: '알 수 없는 오류',
     today: '오늘',
     tomorrow: '내일',
+    inDays: '({{count}}일 후)',
     asap: '즉시',
     overdue: '기한 초과',
     now: '지금',

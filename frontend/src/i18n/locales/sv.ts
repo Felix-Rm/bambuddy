@@ -118,6 +118,7 @@ export default {
     unknownError: 'Okänt fel',
     today: 'Idag',
     tomorrow: 'Imorgon',
+    inDays: '(om {{count}} dagar)',
     asap: 'Så snart som möjligt',
     overdue: 'Försenad',
     now: 'Nu',
