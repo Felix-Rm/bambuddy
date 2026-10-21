@@ -335,9 +335,26 @@ describe('formatETA', () => {
     expect(result).toContain('Demain');
   });
 
-  it('shows weekday for dates beyond tomorrow', () => {
-    const result = formatETA(60 * 48); // 48 hours from now
+  it('shows weekday, calendar date and day count for finishes beyond tomorrow', () => {
+    // Fake clock is 2025-06-15T12:00Z → +48h lands on Jun 17 local day (dayDiff 2).
+    const result = formatETA(60 * 48, '24h');
+    const expectedDate = new Date(Date.now() + 60 * 48 * 60 * 1000).toLocaleDateString([], {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    });
     expect(result).not.toContain('Tomorrow');
+    expect(result.startsWith(expectedDate)).toBe(true);
+    expect(result).toContain('(in 2 days)');
+  });
+
+  it('uses translation for the beyond-tomorrow day count', () => {
+    const t = vi.fn((key: string, options?: Record<string, unknown>) =>
+      key === 'common.inDays' ? `(dans ${options?.count} jours)` : key
+    );
+    const result = formatETA(60 * 72, '24h', t);
+    expect(result).toContain('(dans 3 jours)');
+    expect(t).toHaveBeenCalledWith('common.inDays', { count: 3 });
   });
 
   it('counts from baseTime when one is supplied', () => {

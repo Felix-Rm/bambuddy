@@ -324,12 +324,13 @@ export function formatTimeOnly(
  *   value that changes over time, or the string freezes at first render: it is
  *   only recomputed when the component re-renders, which does not happen while
  *   the underlying data is unchanged (#2740).
- * @returns Formatted ETA string (e.g., "3:45 PM", "Tomorrow 9:30 AM", "Wed 2:00 PM")
+ * @returns Formatted ETA string (e.g., "3:45 PM", "Tomorrow 9:30 AM",
+ *   "Wed, Jun 17 2:00 PM (in 2 days)")
  */
 export function formatETA(
   remainingMinutes: number,
   timeFormat: TimeFormat = 'system',
-  t?: (key: string) => string,
+  t?: (key: string, options?: Record<string, unknown>) => string,
   baseTime?: number
 ): string {
   const now = baseTime != null ? new Date(baseTime) : new Date();
@@ -346,7 +347,15 @@ export function formatETA(
 
   if (dayDiff === 0) return timeStr;
   if (dayDiff === 1) return `${t?.('common.tomorrow') ?? 'Tomorrow'} ${timeStr}`;
-  return `${eta.toLocaleDateString([], { weekday: 'short' })} ${timeStr}`;
+  // Beyond tomorrow a bare weekday is ambiguous in a long queue; include the
+  // calendar date and day count so "Wed" does not look like next Wednesday.
+  const dateStr = eta.toLocaleDateString([], {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
+  const inDays = t?.('common.inDays', { count: dayDiff }) ?? `(in ${dayDiff} days)`;
+  return `${dateStr} ${timeStr} ${inDays}`;
 }
 
 /**
