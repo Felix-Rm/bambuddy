@@ -2449,9 +2449,9 @@ function ArchiveListRow({
               )}
             </button>
           )}
-          {archive.thumbnail_path ? (
+          {archive.thumbnail_path || archive.plate_id != null ? (
             <img
-              src={api.getArchiveThumbnail(archive.id)}
+              src={api.getArchiveDisplayThumbnail(archive)}
               loading="lazy"
               alt=""
               className="w-10 h-10 object-cover rounded"
