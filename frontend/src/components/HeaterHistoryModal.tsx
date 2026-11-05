@@ -25,9 +25,11 @@ interface HeaterHistoryModalProps {
   availableKinds?: HeaterSensorKind[];
 }
 
-type TimeRange = '6h' | '24h' | '48h' | '7d';
+type TimeRange = '15m' | '1h' | '6h' | '24h' | '48h' | '7d';
 
 const TIME_RANGES: { value: TimeRange; label: string; hours: number }[] = [
+  { value: '15m', label: '15m', hours: 0.25 },
+  { value: '1h', label: '1h', hours: 1 },
   { value: '6h', label: '6h', hours: 6 },
   { value: '24h', label: '24h', hours: 24 },
   { value: '48h', label: '48h', hours: 48 },
@@ -83,7 +85,7 @@ export function HeaterHistoryModal({
     queryKey: ['printer-sensor-history', printerId, hours, availableKinds.join(',')],
     queryFn: () => api.getPrinterSensorHistory(printerId, hours, availableKinds),
     enabled: isOpen,
-    refetchInterval: 60000,
+    refetchInterval: 30000,
   });
 
   if (!isOpen) return null;

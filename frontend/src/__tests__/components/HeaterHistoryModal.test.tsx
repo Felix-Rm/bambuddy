@@ -89,6 +89,24 @@ describe('HeaterHistoryModal', () => {
     });
   });
 
+  it('offers 15m and 1h span options and requests that window', async () => {
+    render(<HeaterHistoryModal {...defaultProps} />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '15m' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '1h' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '15m' }));
+    await waitFor(() => {
+      expect(api.getPrinterSensorHistory).toHaveBeenCalledWith(1, 0.25, ['nozzle', 'bed', 'chamber']);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '1h' }));
+    await waitFor(() => {
+      expect(api.getPrinterSensorHistory).toHaveBeenCalledWith(1, 1, ['nozzle', 'bed', 'chamber']);
+    });
+  });
+
   it('shows current nozzle value from last data point', async () => {
     render(<HeaterHistoryModal {...defaultProps} />);
     await waitFor(() => {
