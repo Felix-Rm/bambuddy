@@ -4909,10 +4909,11 @@ async def get_plate_preview(
         with zipfile.ZipFile(file_path, "r") as zf:
             names = zf.namelist()
 
-            # Try to find plate preview images in order of preference
-            # First look for the specific plate being printed (check slice_info for plate index)
-            plate_num = 1
-            if "Metadata/slice_info.config" in names:
+            # Prefer the plate this archive was printed from (#2603). slice_info
+            # only lists plates in file order, so its first entry is plate 1 of
+            # the project — not necessarily the plate that ran.
+            plate_num = archive.plate_id if archive.plate_id and archive.plate_id > 0 else None
+            if plate_num is None and "Metadata/slice_info.config" in names:
                 try:
                     import defusedxml.ElementTree as ET
 
@@ -4922,7 +4923,10 @@ async def get_plate_preview(
                     if plate_elem is not None:
                         plate_num = int(plate_elem.get("value", "1"))
                 except Exception:
-                    pass  # Default plate_num=1 if slice_info is missing or malformed
+                    plate_num = None
+
+            if plate_num is None:
+                plate_num = 1
 
             # Try plate-specific image first, then fall back to plate_1
             preview_paths = [
