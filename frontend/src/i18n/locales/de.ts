@@ -3097,6 +3097,9 @@ export default {
       customHoursLabel: 'Individuelle Sitzungsdauer in Stunden',
       hoursSuffix: 'Stunden',
       warning: 'Längere Sitzungen reduzieren den automatischen Abmeldeschutz. Nur für vertrauenswürdige Einzelnutzer-Installationen empfohlen.',
+      rememberMeDefault: '„Angemeldet bleiben“ standardmäßig aktiv',
+      rememberMeDefaultDescription:
+        'Vorauswahl von „Angemeldet bleiben“ auf der Anmeldeseite (und bei SSO-Autologin). Token laufen weiterhin nach der Sitzungsdauer oben ab; dies behält sie nur über Browserneustarts hinweg.',
     },
 
     // OIDC provider settings

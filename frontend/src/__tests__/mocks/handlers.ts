@@ -565,6 +565,7 @@ export const handlers = [
       smtp_configured: false,
       local_login_enabled: true,
       autologin_provider_id: null,
+      remember_me_default: false,
     })
   ),
   http.get('/api/v1/auth/ldap/status', () =>

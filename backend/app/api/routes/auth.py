@@ -1050,6 +1050,10 @@ async def get_advanced_auth_status(db: AsyncSession = Depends(get_db, scope="fun
     whether to redirect unauthenticated visitors directly to an SSO
     provider, in a single query. ``BAMBUDDY_LOCAL_LOGIN=true`` flips the
     reported value back to True so the recovery path is visible.
+
+    Also surfaces ``remember_me_default`` so the login page can pre-check
+    Remember Me (and SSO autologin can stash persistence) without needing
+    the authenticated /settings endpoint.
     """
     from backend.app.models.oidc_provider import OIDCProvider
     from backend.app.models.settings import Settings as _Settings_for_local_login
@@ -1071,11 +1075,20 @@ async def get_advanced_auth_status(db: AsyncSession = Depends(get_db, scope="fun
     )
     autologin_provider_id = autologin.scalar_one_or_none()
 
+    remember_row = await db.execute(
+        select(_Settings_for_local_login).where(_Settings_for_local_login.key == "remember_me_default")
+    )
+    remember_me_row = remember_row.scalar_one_or_none()
+    # Default False matches AppSettings.remember_me_default — missing/blank
+    # rows stay off so upgrades keep session-only tokens unless opted in.
+    remember_me_default = remember_me_row is not None and remember_me_row.value.lower() == "true"
+
     return {
         "advanced_auth_enabled": advanced_auth_enabled,
         "smtp_configured": smtp_configured,
         "local_login_enabled": local_login_enabled,
         "autologin_provider_id": autologin_provider_id,
+        "remember_me_default": remember_me_default,
     }
 
 

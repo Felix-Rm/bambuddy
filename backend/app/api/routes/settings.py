@@ -217,6 +217,7 @@ _BOOL_SETTING_KEYS = frozenset(
         "ldap_enabled",
         "ldap_auto_provision",
         "local_login_enabled",
+        "remember_me_default",
         "preheat_enabled",
         "queue_keep_bed_warm",
         "obico_enabled",

@@ -3120,6 +3120,9 @@ export default {
       customHoursLabel: 'Custom session lifetime in hours',
       hoursSuffix: 'hours',
       warning: 'Longer sessions reduce automatic logout protection. Recommended only for trusted single-user deployments.',
+      rememberMeDefault: 'Remember Me by default',
+      rememberMeDefaultDescription:
+        'Pre-check Remember Me on the login page (and for SSO autologin). Tokens still expire after the session lifetime above; this only keeps them across browser restarts.',
     },
 
     // OIDC provider settings

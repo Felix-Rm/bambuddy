@@ -1569,6 +1569,8 @@ export interface AppSettings {
   low_stock_threshold: number;
   // Session policy (#1706) — admin-set ceiling, hours, [1, 720]
   session_max_hours: number;
+  // Pre-check Remember Me on the login page (and SSO autologin stash)
+  remember_me_default: boolean;
   // User email notifications toggle
   user_notifications_enabled: boolean;
   // Default print options
@@ -4935,6 +4937,9 @@ export interface AdvancedAuthStatus {
   // #1589: when set, LoginPage redirects to this provider's authorize URL
   // on mount unless ?fallback=local is in the URL or the redirect times out.
   autologin_provider_id: number | null;
+  // Pre-check Remember Me on the login page. Default false; also used by
+  // SSO autologin (no checkbox shown) when stashing persistence across redirect.
+  remember_me_default: boolean;
 }
 
 export interface LDAPStatus {
@@ -5998,6 +6003,11 @@ export const api = {
   getArchiveThumbnail: (id: number) => withMediaToken(`${API_BASE}/archives/${id}/thumbnail?v=${Date.now()}`),
   getArchivePlateThumbnail: (id: number, plateIndex: number) =>
     withMediaToken(`${API_BASE}/archives/${id}/plate-thumbnail/${plateIndex}`),
+  /** Cover image for an archive: the plate that actually printed when known. */
+  getArchiveDisplayThumbnail: (archive: { id: number; plate_id?: number | null }) =>
+    archive.plate_id != null
+      ? withMediaToken(`${API_BASE}/archives/${archive.id}/plate-thumbnail/${archive.plate_id}`)
+      : withMediaToken(`${API_BASE}/archives/${archive.id}/thumbnail?v=${Date.now()}`),
   getArchiveDownload: (id: number) => `${API_BASE}/archives/${id}/download`,
   downloadArchive: async (id: number, filename?: string): Promise<void> => {
     const headers: Record<string, string> = {};

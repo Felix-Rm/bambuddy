@@ -3096,6 +3096,9 @@ export default {
       customHoursLabel: 'カスタムセッション有効期間（時間）',
       hoursSuffix: '時間',
       warning: '長いセッションは自動ログアウト保護を弱めます。信頼できる単一ユーザー環境でのみ推奨されます。',
+      rememberMeDefault: '「ログイン状態を保持する」をデフォルトでオン',
+      rememberMeDefaultDescription:
+        'ログインページで「ログイン状態を保持する」を事前にチェックします（SSO 自動ログインも含む）。トークンは上記のセッション時間後に期限切れになります。ブラウザ再起動後も保持するだけです。',
     },
 
     // OIDC provider settings

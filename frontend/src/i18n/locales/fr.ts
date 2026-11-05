@@ -3039,6 +3039,9 @@ export default {
       customHoursLabel: 'Durée de session personnalisée en heures',
       hoursSuffix: 'heures',
       warning: 'Les sessions plus longues réduisent la protection de déconnexion automatique. Recommandé uniquement pour les déploiements mono-utilisateur de confiance.',
+      rememberMeDefault: '« Se souvenir de moi » activé par défaut',
+      rememberMeDefaultDescription:
+        'Coche « Se souvenir de moi » sur la page de connexion (et pour l’autologin SSO). Les jetons expirent toujours après la durée de session ci-dessus ; cela les conserve seulement après un redémarrage du navigateur.',
     },
 
     // OIDC provider settings
