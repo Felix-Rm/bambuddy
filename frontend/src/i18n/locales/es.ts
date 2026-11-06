@@ -117,6 +117,7 @@ export default {
     unknownError: 'Error desconocido',
     today: 'Hoy',
     tomorrow: 'Mañana',
+    inDays: '(en {{count}} días)',
     asap: 'Lo antes posible',
     overdue: 'Atrasado',
     now: 'Ahora',
