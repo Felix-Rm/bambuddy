@@ -26,6 +26,7 @@ import { useTranslation } from 'react-i18next';
 import { CameraWall, type CameraWallStatus } from '../components/CameraWall';
 import { CAM_WALL_TILE_SIZES, DEFAULT_CAM_WALL_TILE_SIZE } from '../components/camWallTileSize';
 import { type CameraTileStatusMode } from '../components/CameraTile';
+import { openPrinterCameraWindow } from '../components/CameraSourceSwitcher';
 import { api, setStreamToken } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { AuthRetrying } from '../components/AuthRetrying';
@@ -182,7 +183,7 @@ export function CamWallPage() {
   }
 
   return (
-    <div className="min-h-screen bg-bambu-dark p-4">
+    <div className="box-border flex h-dvh flex-col overflow-hidden bg-bambu-dark p-4">
       <CameraWall
         printers={printers}
         maxLive={maxLive}
@@ -196,7 +197,7 @@ export function CamWallPage() {
         onTileClick={
           kiosk
             ? undefined
-            : (id) => (isStandaloneWebApp() ? navigate(`/camera/${id}`) : window.open(`/camera/${id}`, `camera-${id}`))
+            : (id) => (isStandaloneWebApp() ? navigate(`/camera/${id}`) : openPrinterCameraWindow(id))
         }
         // Writes to the same localStorage keys the Printers page reads, so a
         // change made here follows the user back there. A kiosk wall hides the

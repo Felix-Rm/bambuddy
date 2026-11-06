@@ -1,20 +1,27 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQueries } from '@tanstack/react-query';
 import { Settings as SettingsIcon } from 'lucide-react';
-import { DEFAULT_CAM_WALL_TILE_SIZE, camWallGridClasses } from './camWallTileSize';
+import { DEFAULT_CAM_WALL_TILE_SIZE } from './camWallTileSize';
 import { CameraTile, type CameraTileMode, type CameraTileStatusMode } from './CameraTile';
 import { filterKnownHMSErrors } from './HMSErrorModal';
 import { api, type PrinterStatus } from '../api/client';
+import { printerHasExternalCamera } from './CameraSourceSwitcher';
+import { computeCamWallLayout } from '../utils/camWallLayout';
 
-// The wall only ever reads these three fields off a printer, so it asks for no
-// more than that. Printer[] satisfies this structurally, and so does the
-// smaller payload the token-authenticated kiosk feed returns (#2531) — which
-// deliberately carries neither serial number nor IP.
+// The wall only ever reads these fields off a printer, so it asks for no more
+// than that. Printer[] satisfies this structurally, and so does the smaller
+// payload the token-authenticated kiosk feed returns (#2531) — which
+// deliberately carries neither serial number nor IP. The kiosk feed adds
+// has_external_camera instead of the camera URL.
 export interface CameraWallPrinter {
   id: number;
   name: string;
   camera_rotation?: number;
+  external_camera_enabled?: boolean;
+  external_camera_url?: string | null;
+  // Kiosk feed omits the URL; this flag is enough to show the switcher.
+  has_external_camera?: boolean;
 }
 
 // What a tile draws from a printer's status. PrinterStatus satisfies it; so
@@ -50,8 +57,8 @@ interface CameraWallProps {
   // Kiosk walls hide the settings popover — the knobs come from the URL, and
   // there is nobody standing at the screen to turn them.
   showSettings?: boolean;
-  // 1=S, 2=M, 3=L, 4=XL, the same scale as the printer cards (#2735). Sets how
-  // many tiles share a row; the tiles stay 16:9.
+  // Kept for call-site compatibility with the Printers /camwall page. Best-fit
+  // packing ignores the fixed-column knob.
   tileSize?: number;
 }
 
@@ -60,6 +67,11 @@ const MAX_MAX_LIVE = 16;
 const MIN_SNAPSHOT_SEC = 2;
 const MAX_SNAPSHOT_SEC = 60;
 const STATUS_MODES: CameraTileStatusMode[] = ['off', 'compact', 'full'];
+const TILE_ASPECT = 16 / 9;
+const TILE_GAP_PX = 12;
+// Leave a little air above the browser chrome / OS dock when sizing from the
+// viewport bottom rather than a height-constrained parent.
+const VIEWPORT_BOTTOM_PAD_PX = 16;
 
 export function CameraWall({
   printers,
@@ -72,10 +84,12 @@ export function CameraWall({
   onChangeStatusMode,
   statuses,
   showSettings: settingsEnabled = true,
-  tileSize = DEFAULT_CAM_WALL_TILE_SIZE,
+  tileSize: _tileSize = DEFAULT_CAM_WALL_TILE_SIZE,
 }: CameraWallProps) {
   const { t } = useTranslation();
   const tileRefs = useRef<Map<number, HTMLDivElement | null>>(new Map());
+  const gridHostRef = useRef<HTMLDivElement | null>(null);
+  const [gridBounds, setGridBounds] = useState({ width: 0, height: 0 });
 
   // Reuses the same ['printerStatus', id] cache that each PrinterCard
   // populates, so flipping between Cards and Cam Wall is instant. Skipped
@@ -113,6 +127,49 @@ export function CameraWall({
     return () => document.removeEventListener('mousedown', handler);
   }, [showSettings]);
 
+  // Size the tile grid to the host when a parent constrains height (h-dvh page),
+  // otherwise fill from the host's top edge down to the viewport bottom so the
+  // Printers-page embed still maximises panes without a fixed-height wrapper.
+  useLayoutEffect(() => {
+    const host = gridHostRef.current;
+    if (!host) return;
+
+    const measure = () => {
+      const rect = host.getBoundingClientRect();
+      const width = host.clientWidth;
+      const parentHeight = host.clientHeight;
+      const viewportHeight = Math.max(0, window.innerHeight - rect.top - VIEWPORT_BOTTOM_PAD_PX);
+      // Prefer a parent-driven height only when it is clearly intentional; a
+      // content-sized host reports a small clientHeight and would otherwise
+      // lock the layout into a tiny self-fulfilling box.
+      const height = parentHeight >= 120 ? parentHeight : viewportHeight;
+      setGridBounds((prev) =>
+        prev.width === width && prev.height === height ? prev : { width, height },
+      );
+    };
+
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(host);
+    window.addEventListener('resize', measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [printers.length]);
+
+  const layout = useMemo(
+    () =>
+      computeCamWallLayout(
+        printers.length,
+        gridBounds.width,
+        gridBounds.height,
+        TILE_ASPECT,
+        TILE_GAP_PX,
+      ),
+    [printers.length, gridBounds.width, gridBounds.height],
+  );
+
   // IntersectionObserver: a tile is "visible" when ≥40% of it is on-screen.
   // 40% (not 0%) avoids flicker at scroll boundaries where a tile is fractionally
   // visible — we don't want to spin up a live stream for a 5-pixel sliver.
@@ -137,7 +194,7 @@ export function CameraWall({
       if (el) observer.observe(el);
     }
     return () => observer.disconnect();
-  }, [printers]);
+  }, [printers, layout.cols, layout.tileWidth, layout.tileHeight]);
 
   // Live slot allocation: visible tiles get live up to `maxLive`, in printer
   // list order so the assignment is stable. Visible-but-over-cap fall back to
@@ -172,8 +229,8 @@ export function CameraWall({
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between text-xs text-bambu-gray">
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      <div className="flex flex-shrink-0 items-center justify-between text-xs text-bambu-gray">
         <span>
           {t('printers.camWall.summary', {
             live: Array.from(modeByPrinter.values()).filter((m) => m === 'live').length,
@@ -276,43 +333,66 @@ export function CameraWall({
         )}
       </div>
 
-      <div className={`grid gap-3 ${camWallGridClasses(tileSize)}`} data-testid="camwall-grid">
-        {printers.map((p) => {
-          const mode = modeByPrinter.get(p.id) ?? 'paused';
-          return (
-            <div
-              key={p.id}
-              ref={(el) => {
-                tileRefs.current.set(p.id, el);
-              }}
-              data-printer-id={p.id}
-            >
-              <CameraTile
-                printerId={p.id}
-                printerName={p.name}
-                cameraRotation={p.camera_rotation}
-                mode={mode}
-                snapshotIntervalMs={snapshotIntervalSec * 1000}
-                connected={statusByPrinter.get(p.id)?.connected ?? false}
-                statusMode={statusMode}
-                printerState={statusByPrinter.get(p.id)?.state ?? null}
-                progress={statusByPrinter.get(p.id)?.progress ?? null}
-                remainingMin={statusByPrinter.get(p.id)?.remaining_time ?? null}
-                layerNum={statusByPrinter.get(p.id)?.layer_num ?? null}
-                totalLayers={statusByPrinter.get(p.id)?.total_layers ?? null}
-                printName={
-                  statusByPrinter.get(p.id)?.subtask_name ??
-                  statusByPrinter.get(p.id)?.gcode_file ??
-                  null
-                }
-                hmsErrorCount={
-                  filterKnownHMSErrors(statusByPrinter.get(p.id)?.hms_errors ?? []).length
-                }
-                onClick={onTileClick ? () => onTileClick(p.id, p.name) : undefined}
-              />
-            </div>
-          );
-        })}
+      <div
+        ref={gridHostRef}
+        className="min-h-0 w-full flex-1"
+        data-testid="camwall-grid"
+        style={{
+          // When the parent does not constrain height, pin the host to the
+          // measured remaining viewport so the packing math has a real box.
+          height: gridBounds.height > 0 ? gridBounds.height : undefined,
+          minHeight: gridBounds.height > 0 ? gridBounds.height : undefined,
+        }}
+      >
+        <div
+          className="grid h-full w-full"
+          style={{
+            gap: TILE_GAP_PX,
+            gridTemplateColumns: `repeat(${layout.cols}, ${layout.tileWidth}px)`,
+            gridTemplateRows: `repeat(${layout.rows}, ${layout.tileHeight}px)`,
+            justifyContent: 'center',
+            alignContent: 'center',
+          }}
+        >
+          {printers.map((p) => {
+            const mode = modeByPrinter.get(p.id) ?? 'paused';
+            return (
+              <div
+                key={p.id}
+                ref={(el) => {
+                  tileRefs.current.set(p.id, el);
+                }}
+                data-printer-id={p.id}
+                style={{ width: layout.tileWidth, height: layout.tileHeight }}
+              >
+                <CameraTile
+                  printerId={p.id}
+                  printerName={p.name}
+                  cameraRotation={p.camera_rotation}
+                  mode={mode}
+                  snapshotIntervalMs={snapshotIntervalSec * 1000}
+                  connected={statusByPrinter.get(p.id)?.connected ?? false}
+                  hasExternalCamera={printerHasExternalCamera(p) || Boolean(p.has_external_camera)}
+                  statusMode={statusMode}
+                  printerState={statusByPrinter.get(p.id)?.state ?? null}
+                  progress={statusByPrinter.get(p.id)?.progress ?? null}
+                  remainingMin={statusByPrinter.get(p.id)?.remaining_time ?? null}
+                  layerNum={statusByPrinter.get(p.id)?.layer_num ?? null}
+                  totalLayers={statusByPrinter.get(p.id)?.total_layers ?? null}
+                  printName={
+                    statusByPrinter.get(p.id)?.subtask_name ??
+                    statusByPrinter.get(p.id)?.gcode_file ??
+                    null
+                  }
+                  hmsErrorCount={
+                    filterKnownHMSErrors(statusByPrinter.get(p.id)?.hms_errors ?? []).length
+                  }
+                  onClick={onTileClick ? () => onTileClick(p.id, p.name) : undefined}
+                />
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

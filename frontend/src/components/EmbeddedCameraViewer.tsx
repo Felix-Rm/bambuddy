@@ -13,6 +13,7 @@ import { useCameraViewerId } from '../hooks/useCameraViewerId';
 import { isSideways, useSidewaysBox } from '../hooks/useSidewaysBox';
 import { isStandaloneWebApp, openCameraWindow } from '../utils/camera';
 import { useIsSidebarCompact } from '../hooks/useIsSidebarCompact';
+import { CameraSourceSwitcher, printerHasExternalCamera, usePersistedCameraSource, type CameraSource } from './CameraSourceSwitcher';
 
 export interface EmbeddedCameraViewerProps {
   printerId: number;
@@ -137,6 +138,9 @@ export function EmbeddedCameraViewer({ printerId, printerName, viewerIndex = 0, 
     queryFn: () => api.getPrinter(printerId),
     enabled: printerId > 0,
   });
+
+  const hasExternalCamera = printerHasExternalCamera(printer);
+  const { selectedSource, selectSource } = usePersistedCameraSource(printerId, hasExternalCamera);
 
   // A camera turned sideways is laid out with the video area's sides swapped,
   // or it is cut off in a wide window and boxed in a tall one (#3362).
@@ -495,6 +499,27 @@ export function EmbeddedCameraViewer({ printerId, printerName, viewerIndex = 0, 
     setTimeout(() => setImageKey(Date.now()), 100);
   };
 
+  const switchCameraSource = (next: CameraSource) => {
+    if (!selectSource(next)) return;
+    // Changing img.src closes this viewer's HTTP connection. Stop this viewer
+    // the same way refresh does so the previous source is not left attached.
+    // Other viewers of that source stay up.
+    setStreamLoading(true);
+    setStreamError(false);
+    setReconnectAttempts(0);
+    setIsReconnecting(false);
+    if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+
+    const stopHeaders: Record<string, string> = {};
+    const stopToken = getAuthToken();
+    if (stopToken) stopHeaders['Authorization'] = `Bearer ${stopToken}`;
+    fetch(`/api/v1/printers/${printerId}/camera/stop?viewer=${viewerId}`, { method: 'POST', headers: stopHeaders }).catch(() => {});
+
+    if (imgRef.current) imgRef.current.src = '';
+    setTimeout(() => setImageKey(Date.now()), 100);
+  };
+
   // Drag handlers
   const handleMouseDown = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('.no-drag')) return;
@@ -585,7 +610,8 @@ export function EmbeddedCameraViewer({ printerId, printerName, viewerIndex = 0, 
     }
   }, [isDragging, isResizing, dragOffset, minY]);
 
-  const streamUrl = withStreamToken(`/api/v1/printers/${printerId}/camera/stream?fps=15&t=${imageKey}&viewer=${viewerId}`);
+  const sourceQuery = hasExternalCamera ? `&source=${encodeURIComponent(selectedSource)}` : '';
+  const streamUrl = withStreamToken(`/api/v1/printers/${printerId}/camera/stream?fps=15&t=${imageKey}&viewer=${viewerId}${sourceQuery}`);
 
   return (
     <div
@@ -610,6 +636,12 @@ export function EmbeddedCameraViewer({ printerId, printerName, viewerIndex = 0, 
           <span className="truncate">{printer?.name || printerName}</span>
         </div>
         <div className="flex items-center gap-1 no-drag">
+          {hasExternalCamera && !isMinimized && (
+            <CameraSourceSwitcher
+              selected={selectedSource}
+              onSelect={switchCameraSource}
+            />
+          )}
           <button
             onClick={() => chamberLightMutation.mutate(!status?.chamber_light)}
             disabled={!status?.connected || chamberLightMutation.isPending || !hasPermission('printers:control')}

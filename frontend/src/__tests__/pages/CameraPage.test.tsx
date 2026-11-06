@@ -5,7 +5,9 @@
 import { StrictMode } from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor, render as rtlRender } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { CameraPage } from '../../pages/CameraPage';
+import { setAuthToken, setStreamToken } from '../../api/client';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -77,10 +79,19 @@ function renderCameraPage(printerId: number, search = '', strict = false, entrie
   return rtlRender(strict ? <StrictMode>{tree}</StrictMode> : tree);
 }
 
+function cameraImgSrcs(): string[] {
+  return [...document.querySelectorAll('img')].map((el) => el.getAttribute('src') || '');
+}
+
 describe('CameraPage', () => {
   const originalTitle = document.title;
 
   beforeEach(() => {
+    // The stream-token hook keeps a copied popup token across unmount.
+    // Each test starts without one, or a later case would render the previous token.
+    setStreamToken(null);
+    setAuthToken(null);
+    sessionStorage.clear();
     server.use(
       http.get('/api/v1/printers/:id', () => {
         return HttpResponse.json(mockPrinter);
@@ -606,6 +617,100 @@ describe('CameraPage', () => {
       } finally {
         restore();
       }
+    });
+  });
+
+  describe('camera source switcher', () => {
+    const printerWithExternal = {
+      ...mockPrinter,
+      external_camera_enabled: true,
+      external_camera_url: 'http://192.168.1.50/mjpeg',
+      external_camera_type: 'mjpeg',
+    };
+
+    beforeEach(() => {
+      vi.mocked(localStorage.getItem).mockReset();
+      vi.mocked(localStorage.setItem).mockReset();
+    });
+
+    it('hides camera badges when no external camera is configured', async () => {
+      renderCameraPage(1);
+
+      await waitFor(() => {
+        expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
+      });
+      expect(screen.queryByRole('button', { name: 'Built-in' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'External' })).not.toBeInTheDocument();
+    });
+
+    it('shows built-in and external badges when an external camera is enabled', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id', () => HttpResponse.json(printerWithExternal))
+      );
+      renderCameraPage(1);
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'External' })).toBeInTheDocument();
+      });
+      expect(screen.getByRole('button', { name: 'Built-in' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'External' })).toHaveClass('bg-bambu-green');
+    });
+
+    it('switches the stream URL to source=builtin when Built-in is clicked', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id', () => HttpResponse.json(printerWithExternal))
+      );
+      renderCameraPage(1);
+
+      await waitFor(() => {
+        const srcs = cameraImgSrcs();
+        expect(srcs.some((src) => src.includes('/camera/stream'))).toBe(true);
+        expect(srcs.some((src) => src.includes('source=external'))).toBe(true);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Built-in' })).toBeInTheDocument();
+      });
+      await userEvent.click(screen.getByRole('button', { name: 'Built-in' }));
+
+      await waitFor(() => {
+        expect(cameraImgSrcs().some((src) => src.includes('source=builtin'))).toBe(true);
+      });
+    });
+
+    it('round-trips back to source=external after Built-in', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id', () => HttpResponse.json(printerWithExternal))
+      );
+      renderCameraPage(1);
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Built-in' })).toBeInTheDocument();
+      });
+      await userEvent.click(screen.getByRole('button', { name: 'Built-in' }));
+      await waitFor(() => {
+        expect(cameraImgSrcs().some((src) => src.includes('source=builtin'))).toBe(true);
+      });
+
+      await userEvent.click(screen.getByRole('button', { name: 'External' }));
+      await waitFor(() => {
+        expect(cameraImgSrcs().some((src) => src.includes('source=external'))).toBe(true);
+      });
+    });
+
+    it('reopens on the stored camera for that printer', async () => {
+      vi.mocked(localStorage.getItem).mockImplementation((key) =>
+        key === 'cameraSource_1' ? 'builtin' : null
+      );
+      server.use(
+        http.get('/api/v1/printers/:id', () => HttpResponse.json(printerWithExternal))
+      );
+      renderCameraPage(1);
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Built-in' })).toHaveClass('bg-bambu-green');
+        expect(cameraImgSrcs().some((src) => src.includes('source=builtin'))).toBe(true);
+      });
     });
   });
 
