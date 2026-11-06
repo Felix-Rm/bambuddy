@@ -146,7 +146,10 @@ export function LoginPage() {
   const [emailOTPSent, setEmailOTPSent] = useState(false);
   const twoFAInputRef = useRef<HTMLInputElement>(null);
 
+  // Optimistic default matches AppSettings.remember_me_default; synced from
+  // /auth/advanced-auth/status once it loads (unless the user already toggled).
   const [rememberMe, setRememberMe] = useState(false);
+  const rememberMeTouchedRef = useRef(false);
 
   // H-6: Password reset step state
   const [resetToken, setResetToken] = useState('');
@@ -158,6 +161,17 @@ export function LoginPage() {
     queryKey: ['advancedAuthStatus'],
     queryFn: () => api.getAdvancedAuthStatus(),
   });
+
+  useEffect(() => {
+    if (rememberMeTouchedRef.current) return;
+    if (advancedAuthStatus?.remember_me_default === undefined) return;
+    setRememberMe(advancedAuthStatus.remember_me_default);
+  }, [advancedAuthStatus?.remember_me_default]);
+
+  function handleRememberMeChange(checked: boolean) {
+    rememberMeTouchedRef.current = true;
+    setRememberMe(checked);
+  }
 
   // Fetch enabled OIDC providers for login buttons
   const { data: oidcProviders } = useQuery({
@@ -211,6 +225,17 @@ export function LoginPage() {
         if (fromState?.pathname) {
           stashPostLoginRedirect(`${fromState.pathname}${fromState.search ?? ''}`);
         }
+        // Autologin never shows the checkbox — honour the admin default so
+        // SSO-only installs still get persistent tokens when configured.
+        try {
+          if (advancedAuthStatus.remember_me_default === true) {
+            sessionStorage.setItem(REMEMBER_ME_KEY, '1');
+          } else {
+            sessionStorage.removeItem(REMEMBER_ME_KEY);
+          }
+        } catch (err) {
+          console.warn('autologin: setItem/removeItem auth_remember_me failed', err);
+        }
         window.location.href = (result as { auth_url: string }).auth_url;
       })
       .catch(() => {
@@ -246,6 +271,10 @@ export function LoginPage() {
     if (!oidcToken && !oidcError) return;
 
     const savedRememberMe = consumeSavedRememberMe();
+    // Preference came from the pre-redirect checkbox/autologin stash — do not
+    // let the later remember_me_default sync overwrite it (e.g. unchecked → true).
+    rememberMeTouchedRef.current = true;
+    setRememberMe(savedRememberMe);
 
     if (oidcError) {
       // L-3: Whitelist known OIDC error codes so provider-controlled text is never
@@ -782,7 +811,7 @@ export function LoginPage() {
               id="remember-me"
               type="checkbox"
               checked={rememberMe}
-              onChange={(e) => setRememberMe(e.target.checked)}
+              onChange={(e) => handleRememberMeChange(e.target.checked)}
               className="h-4 w-4 rounded border-bambu-dark-tertiary bg-bambu-dark-secondary text-bambu-green focus:ring-bambu-green/50 cursor-pointer"
             />
             <label htmlFor="remember-me" className="text-sm text-bambu-gray cursor-pointer">
@@ -832,7 +861,7 @@ export function LoginPage() {
                   id="remember-me"
                   type="checkbox"
                   checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
+                  onChange={(e) => handleRememberMeChange(e.target.checked)}
                   className="h-4 w-4 rounded border-bambu-dark-tertiary bg-bambu-dark-secondary text-bambu-green focus:ring-bambu-green/50 cursor-pointer"
                 />
                 <label htmlFor="remember-me" className="text-sm text-bambu-gray cursor-pointer">

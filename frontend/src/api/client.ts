@@ -1612,6 +1612,8 @@ export interface AppSettings {
   low_stock_threshold: number;
   // Session policy (#1706) — admin-set ceiling, hours, [1, 720]
   session_max_hours: number;
+  // Pre-check Remember Me on the login page (and SSO autologin stash)
+  remember_me_default: boolean;
   // User email notifications toggle
   user_notifications_enabled: boolean;
   // Default print options
@@ -4978,6 +4980,9 @@ export interface AdvancedAuthStatus {
   // #1589: when set, LoginPage redirects to this provider's authorize URL
   // on mount unless ?fallback=local is in the URL or the redirect times out.
   autologin_provider_id: number | null;
+  // Pre-check Remember Me on the login page. Default false; also used by
+  // SSO autologin (no checkbox shown) when stashing persistence across redirect.
+  remember_me_default: boolean;
 }
 
 export interface LDAPStatus {

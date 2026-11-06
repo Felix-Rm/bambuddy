@@ -841,7 +841,7 @@ export function SettingsPage() {
   });
 
   // Advanced auth status for user creation
-  const { data: advancedAuthStatus = { advanced_auth_enabled: false, smtp_configured: false, local_login_enabled: true, autologin_provider_id: null } } = useQuery({
+  const { data: advancedAuthStatus = { advanced_auth_enabled: false, smtp_configured: false, local_login_enabled: true, autologin_provider_id: null, remember_me_default: false } } = useQuery({
     queryKey: ['advancedAuthStatus'],
     queryFn: () => api.getAdvancedAuthStatus(),
   });
@@ -1366,6 +1366,7 @@ export function SettingsPage() {
       (baseline.chamber_temp_presets ?? '') !== (localSettings.chamber_temp_presets ?? '') ||
       (baseline.fan_speed_presets ?? '') !== (localSettings.fan_speed_presets ?? '') ||
       (baseline.session_max_hours ?? 24) !== (localSettings.session_max_hours ?? 24) ||
+      (baseline.remember_me_default ?? false) !== (localSettings.remember_me_default ?? false) ||
       (baseline.billing_enabled ?? false) !== (localSettings.billing_enabled ?? false) ||
       (baseline.printer_kill_switch_enabled ?? false) !== (localSettings.printer_kill_switch_enabled ?? false) ||
       (baseline.finance_budget_reset_day ?? 1) !== (localSettings.finance_budget_reset_day ?? 1) ||
@@ -1495,6 +1496,7 @@ export function SettingsPage() {
         chamber_temp_presets: localSettings.chamber_temp_presets,
         fan_speed_presets: localSettings.fan_speed_presets,
         session_max_hours: localSettings.session_max_hours,
+        remember_me_default: localSettings.remember_me_default,
         billing_enabled: localSettings.billing_enabled,
         printer_kill_switch_enabled: localSettings.printer_kill_switch_enabled,
         finance_budget_reset_day: localSettings.finance_budget_reset_day,
@@ -7064,6 +7066,26 @@ export function SettingsPage() {
                         </p>
                       </div>
                     )}
+                    <div className="flex items-center justify-between mt-4 pt-4 border-t border-bambu-dark-tertiary">
+                      <div>
+                        <p className="text-white text-sm font-medium">
+                          {t('settings.sessionPolicy.rememberMeDefault')}
+                        </p>
+                        <p className="text-xs text-bambu-gray mt-0.5">
+                          {t('settings.sessionPolicy.rememberMeDefaultDescription')}
+                        </p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="sr-only peer"
+                          checked={localSettings?.remember_me_default ?? false}
+                          disabled={authEnabled && !hasPermission('settings:update')}
+                          onChange={(e) => updateSetting('remember_me_default', e.target.checked)}
+                        />
+                        <div className="w-11 h-6 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-bambu-green peer-disabled:opacity-50 peer-disabled:cursor-not-allowed"></div>
+                      </label>
+                    </div>
                   </CardContent>
                 </Card>
 

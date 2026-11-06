@@ -2948,7 +2948,10 @@ export default {
       preset30d: '30일',
       customHoursLabel: '사용자 지정 세션 수명(시간)',
       hoursSuffix: '시간',
-      warning: '세션이 길어질수록 자동 로그아웃 보호가 약해집니다. 신뢰할 수 있는 단일 사용자 배포에서만 권장됩니다.'
+      warning: '세션이 길어질수록 자동 로그아웃 보호가 약해집니다. 신뢰할 수 있는 단일 사용자 배포에서만 권장됩니다.',
+      rememberMeDefault: '기본적으로 ‘로그인 유지’ 선택',
+      rememberMeDefaultDescription:
+        '로그인 페이지에서 ‘로그인 유지’를 미리 선택합니다(SSO 자동 로그인 포함). 토큰은 위의 세션 수명 이후에도 만료되며, 브라우저 재시작 후에도 유지되도록 할 뿐입니다.',
     },
     oidc: {
       title: 'SSO / OIDC 제공자',

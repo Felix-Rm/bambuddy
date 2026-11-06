@@ -3118,6 +3118,9 @@ export default {
       customHoursLabel: 'Anpassad sessionstid i timmar',
       hoursSuffix: 'timmar',
       warning: 'Längre sessioner minskar skyddet mot automatisk utloggning. Rekommenderas endast för betrodda enanvändarutplaceringar.',
+      rememberMeDefault: 'Kom ihåg mig aktiverat som standard',
+      rememberMeDefaultDescription:
+        'Förkryssa Kom ihåg mig på inloggningssidan (och för SSO-autologin). Tokens går fortfarande ut efter sessionstiden ovan; detta behåller dem bara över webbläsaromstarter.',
     },
 
     // OIDC provider settings

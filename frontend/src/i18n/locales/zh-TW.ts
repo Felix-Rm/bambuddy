@@ -3084,6 +3084,9 @@ export default {
       customHoursLabel: '自訂工作階段有效期（小時）',
       hoursSuffix: '小時',
       warning: '較長的工作階段會削弱自動登出保護。僅建議在受信任的單一使用者部署中使用。',
+      rememberMeDefault: '預設勾選「記住我」',
+      rememberMeDefaultDescription:
+        '在登入頁預先勾選「記住我」（含 SSO 自動登入）。權杖仍會在上方工作階段時效後過期；這只讓權杖在瀏覽器重新啟動後保留。',
     },
 
     // OIDC provider settings

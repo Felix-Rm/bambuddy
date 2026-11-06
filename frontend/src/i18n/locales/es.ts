@@ -3100,6 +3100,9 @@ export default {
       customHoursLabel: 'Duración de sesión personalizada en horas',
       hoursSuffix: 'horas',
       warning: 'Las sesiones más largas reducen la protección de cierre automático. Recomendado solo para implementaciones de usuario único en entornos de confianza.',
+      rememberMeDefault: 'Recordarme activado por defecto',
+      rememberMeDefaultDescription:
+        'Marca Recordarme de antemano en la página de inicio de sesión (y en el autologin SSO). Los tokens siguen caducando tras la duración de sesión de arriba; esto solo los conserva entre reinicios del navegador.',
     },
 
     // OIDC provider settings

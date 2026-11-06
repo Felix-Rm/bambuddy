@@ -3039,6 +3039,9 @@ export default {
       customHoursLabel: 'Durata personalizzata della sessione in ore',
       hoursSuffix: 'ore',
       warning: 'Le sessioni più lunghe riducono la protezione di disconnessione automatica. Consigliato solo per installazioni mono-utente attendibili.',
+      rememberMeDefault: 'Ricordami attivo per impostazione predefinita',
+      rememberMeDefaultDescription:
+        'Preseleziona Ricordami nella pagina di accesso (e per l’autologin SSO). I token scadono comunque dopo la durata della sessione sopra; questo li conserva solo tra i riavvii del browser.',
     },
 
     // OIDC provider settings

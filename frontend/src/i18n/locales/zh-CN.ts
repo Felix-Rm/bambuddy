@@ -3084,6 +3084,9 @@ export default {
       customHoursLabel: '自定义会话有效期（小时）',
       hoursSuffix: '小时',
       warning: '更长的会话会减弱自动注销保护。仅建议在受信任的单用户部署中使用。',
+      rememberMeDefault: '默认勾选“记住我”',
+      rememberMeDefaultDescription:
+        '在登录页预勾选“记住我”（含 SSO 自动登录）。令牌仍会在上方会话时长后过期；这只让令牌在浏览器重启后保留。',
     },
 
     // OIDC provider settings

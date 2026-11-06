@@ -3101,6 +3101,9 @@ export default {
       customHoursLabel: 'Özel oturum süresi (saat)',
       hoursSuffix: 'saat',
       warning: 'Daha uzun oturumlar otomatik oturum kapatma korumasını azaltır. Yalnızca güvenilir tek kullanıcılı dağıtımlar için önerilir.',
+      rememberMeDefault: 'Beni Hatırla varsayılan olarak açık',
+      rememberMeDefaultDescription:
+        'Giriş sayfasında Beni Hatırla’yı önceden işaretle (ve SSO otomatik girişte). Belirteçler yukarıdaki oturum süresinden sonra yine de sona erer; bu yalnızca tarayıcı yeniden başlatmalarında saklar.',
     },
 
     // OIDC sağlayıcı ayarları

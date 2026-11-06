@@ -3119,6 +3119,9 @@ export default {
       customHoursLabel: 'Aangepaste sessieduur in uren',
       hoursSuffix: 'uren',
       warning: 'Langere sessies verminderen de bescherming door automatisch uitloggen. Alleen aanbevolen voor vertrouwde installaties met één gebruiker.',
+      rememberMeDefault: 'Onthoud mij standaard aan',
+      rememberMeDefaultDescription:
+        'Vink Onthoud mij vooraf aan op de inlogpagina (en bij SSO-autologin). Tokens verlopen nog steeds na de sessieduur hierboven; dit bewaart ze alleen over browsherstarts heen.',
     },
 
     // OIDC provider settings
