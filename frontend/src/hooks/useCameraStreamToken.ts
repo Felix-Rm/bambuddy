@@ -4,6 +4,8 @@ import {
   api,
   setStreamToken,
   getStreamToken,
+  getStreamTokenSetAt,
+  getAuthToken,
   setMediaToken,
   getMediaToken,
   withStreamToken,
@@ -85,7 +87,7 @@ export function useStreamTokenSync() {
   // ``true`` on first render because ``authEnabled`` defaults to false,
   // firing a 401 POST on the login page before AuthContext had a chance
   // to settle on ``authEnabled=true, user=null``.
-  const signedIn = !authLoading && (!authEnabled || user !== null);
+  const signedIn = !authLoading && (!authEnabled || user !== null || !!getAuthToken());
 
   const { data: mediaData } = useQuery({
     queryKey: ['media-token', user?.id ?? null],
@@ -100,12 +102,19 @@ export function useStreamTokenSync() {
   // endpoint is open then too.
   const canViewCamera = !authEnabled || hasPermission('camera:view');
 
+  // A camera popup copies sessionStorage from the opener. Reuse that token
+  // so the first <img> request does not wait on a fresh mint.
+  const persisted = getStreamToken();
+  const persistedAt = getStreamTokenSetAt();
+
   const { data: cameraData } = useQuery({
     queryKey: ['camera-stream-token', user?.id ?? null],
     queryFn: () => api.getCameraStreamToken(),
     enabled: signedIn && canViewCamera,
     staleTime: 50 * 60 * 1000,
     refetchInterval: 50 * 60 * 1000,
+    initialData: persisted ? { token: persisted } : undefined,
+    initialDataUpdatedAt: persisted ? persistedAt : undefined,
   });
 
   const mediaTokenValue = mediaData?.token ?? null;
@@ -123,7 +132,6 @@ export function useStreamTokenSync() {
 
     return () => {
       setMediaToken(null);
-      setStreamToken(null);
     };
   }, [mediaTokenValue, cameraTokenValue]);
 
