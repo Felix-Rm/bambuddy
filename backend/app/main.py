@@ -11248,7 +11248,7 @@ def stop_ams_history_recording():
 
 # Printer sensor history recording (nozzle / bed / chamber)
 _printer_sensor_history_task: asyncio.Task | None = None
-PRINTER_SENSOR_HISTORY_INTERVAL = 60  # Record every minute — heaters move faster than AMS humidity
+PRINTER_SENSOR_HISTORY_INTERVAL = 30  # Record every 30s — heaters move faster than AMS humidity
 PRINTER_SENSOR_HISTORY_RETENTION_DAYS = 30
 _printer_sensor_cleanup_counter = 0
 # Sensor kinds tracked in state.temperatures — these are the normalised keys the
