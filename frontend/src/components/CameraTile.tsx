@@ -6,6 +6,7 @@ import { formatDuration } from '../utils/date';
 import { useStreamImgRef } from '../hooks/useStreamImgRef';
 import { useCameraViewerId } from '../hooks/useCameraViewerId';
 import { isSideways, useSidewaysBox } from '../hooks/useSidewaysBox';
+import { CameraSourceSwitcher, usePersistedCameraSource, type CameraSource } from './CameraSourceSwitcher';
 
 export type CameraTileMode = 'live' | 'snapshot' | 'paused';
 export type CameraTileStatusMode = 'off' | 'compact' | 'full';
@@ -18,6 +19,10 @@ interface CameraTileProps {
   snapshotIntervalMs: number;
   connected: boolean;
   onClick?: () => void;
+  // When true, the tile shows Built-in / External between the status chip
+  // and the Live badge. The stream URL then carries source= so this pane
+  // can pick independently of other viewers.
+  hasExternalCamera?: boolean;
   // Optional status overlay — wired by CameraWall from the shared
   // ['printerStatus', id] query. All optional so existing tests don't break.
   statusMode?: CameraTileStatusMode;
@@ -43,6 +48,15 @@ const RENEWAL_RETRY_MS = 5_000;
 // A renewal with no frame by then has failed too: a snapshot camera that is
 // down keeps its stream open without one, and the img fires no event at all.
 const RENEWAL_FIRST_FRAME_MS = 15_000;
+
+function cameraSourceOf(url: string): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url, 'http://localhost').searchParams.get('source');
+  } catch {
+    return null;
+  }
+}
 
 type StatusBucket = 'printing' | 'paused' | 'finished' | 'error' | 'idle';
 
@@ -77,6 +91,7 @@ export function CameraTile({
   snapshotIntervalMs,
   connected,
   onClick,
+  hasExternalCamera = false,
   statusMode = 'off',
   printerState = null,
   progress = null,
@@ -89,6 +104,11 @@ export function CameraTile({
   const { t } = useTranslation();
   const [bust, setBust] = useState(0);
   const [errored, setErrored] = useState(false);
+  // Last URL that actually painted. While a new source is still starting, a
+  // second img keeps that URL so the tile does not go blank. Renewal does not
+  // use this: the same camera must close before it opens again.
+  const [shownSrc, setShownSrc] = useState('');
+  const { selectedSource, selectSource } = usePersistedCameraSource(printerId, hasExternalCamera);
   // The old stream is closed and the new one not yet due: the img renders with
   // no src (removing it closes the connection), so no re-render reopens it early.
   const [reopening, setReopening] = useState(false);
@@ -97,9 +117,13 @@ export function CameraTile({
   // its stream closed; the /camera/stop sent on leaving live mode is skipped
   // while a dropped img still holds it.
   const imgRef = useRef<HTMLImageElement | null>(null);
+  // The held frame is a second img. It must not take imgRef, or a renewal
+  // would close the new source and leave the old one running.
+  const heldImgRef = useRef<HTMLImageElement | null>(null);
   // On its stream and its /camera/stop: the stop ends this tile's stream only.
   const viewerId = useCameraViewerId();
   const attachImg = useStreamImgRef(imgRef);
+  const attachHeldImg = useStreamImgRef(heldImgRef);
   // 'renewed': the current img is a renewal not yet showing a frame; 'retried':
   // it is the one retry of a renewal that failed.
   const renewalRef = useRef<'none' | 'renewed' | 'retried'>('none');
@@ -131,7 +155,9 @@ export function CameraTile({
     setErrored(false);
     snapshotRetriedRef.current = false;
     setBust((b) => b + 1);
-  }, [mode, printerId, viewerId]);
+    // selectedSource: switching cameras refreshes the picture. Leaving live
+    // still POSTs /camera/stop above — closing the img is not enough on this tree.
+  }, [mode, printerId, viewerId, selectedSource]);
 
   useEffect(() => {
     return () => {
@@ -224,12 +250,30 @@ export function CameraTile({
     };
   }, [mode, connected, reopenAfter, clearFirstFrameTimer]);
 
+  // A source change is not a renewal of the camera that was already open.
+  // Drop a pending close/reopen so the new source is not held shut.
+  const selectedSourceRef = useRef(selectedSource);
+  useEffect(() => {
+    if (selectedSourceRef.current === selectedSource) return;
+    selectedSourceRef.current = selectedSource;
+    if (renewalTimerRef.current !== null) clearTimeout(renewalTimerRef.current);
+    renewalTimerRef.current = null;
+    clearFirstFrameTimer();
+    renewalRef.current = 'none';
+    setReopening(false);
+  }, [selectedSource, clearFirstFrameTimer]);
+
+  const sourceQuery = hasExternalCamera ? `&source=${encodeURIComponent(selectedSource)}` : '';
   const liveUrl = withStreamToken(
-    `/api/v1/printers/${printerId}/camera/stream?fps=${LIVE_FPS}&t=${bust}&viewer=${viewerId}`,
+    `/api/v1/printers/${printerId}/camera/stream?fps=${LIVE_FPS}&t=${bust}&viewer=${viewerId}${sourceQuery}`,
   );
   const snapshotUrl = withStreamToken(
-    `/api/v1/printers/${printerId}/camera/snapshot?t=${bust}`,
+    `/api/v1/printers/${printerId}/camera/snapshot?t=${bust}${sourceQuery}`,
   );
+  const nextSrc = reopening || !connected || mode === 'paused' ? '' : mode === 'live' ? liveUrl : snapshotUrl;
+  // Same source (renewal, snapshot tick) must not keep the previous URL open.
+  const holdingPrevious =
+    shownSrc !== '' && nextSrc !== '' && cameraSourceOf(shownSrc) !== cameraSourceOf(nextSrc);
 
   // A kiosk wall passes no onClick — there is no pointer at a TV, and the page
   // is authenticated by a token that cannot open the single-camera view. Render
@@ -270,8 +314,14 @@ export function CameraTile({
   const hasRemaining = remainingMin != null && remainingMin > 0;
 
   const rootClass = `group relative aspect-video w-full overflow-hidden rounded-lg border border-bambu-dark-tertiary bg-black text-left ${
-    interactive ? 'focus:outline-none focus:ring-2 focus:ring-bambu-green' : 'cursor-default'
+    interactive ? 'cursor-pointer focus:outline-none focus:ring-2 focus:ring-bambu-green' : 'cursor-default'
   }`;
+
+  const selectTileSource = (next: CameraSource) => {
+    const current = imgRef.current?.getAttribute('src');
+    if (!selectSource(next)) return;
+    if (current) setShownSrc(current);
+  };
 
   const content = (
     <>
@@ -289,63 +339,91 @@ export function CameraTile({
           <span className="text-xs">{t('printers.camWall.noSignal')}</span>
         </div>
       ) : (
-        <img
-          ref={attachImg}
-          key={`${mode}-${bust}`}
-          src={reopening ? undefined : mode === 'live' ? liveUrl : snapshotUrl}
-          alt={printerName}
-          draggable={false}
-          loading="lazy"
-          className="h-full w-full select-none object-contain"
-          style={imgStyle}
-          onLoad={() => {
-            clearFirstFrameTimer();
-            renewalRef.current = 'none';
-            snapshotRetriedRef.current = false;
-          }}
-          onError={(e) => {
-            // An img with an empty or missing src is closed, not failed.
-            if (!e.currentTarget.getAttribute('src')) return;
-            if (mode === 'snapshot' && !snapshotRetriedRef.current) {
-              snapshotRetriedRef.current = true;
-              return;
-            }
-            streamFailed();
-          }}
-        />
-      )}
-
-      {/* Status chip (top-left) */}
-      {showChip && (
-        <span
-          className={`absolute left-2 top-2 flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${BUCKET_CHIP_CLASS[bucket]}`}
-        >
-          {hmsErrorCount > 0 && (
-            <AlertTriangle
-              className="h-3 w-3"
+        <>
+          {holdingPrevious && (
+            <img
+              ref={attachHeldImg}
+              src={shownSrc}
+              alt=""
               aria-hidden="true"
+              draggable={false}
+              className="h-full w-full select-none object-contain"
+              style={imgStyle}
             />
           )}
-          <span>{t(`printers.status.${bucket}`)}</span>
-        </span>
+          <img
+            ref={attachImg}
+            key={`${mode}-${bust}`}
+            src={reopening ? undefined : mode === 'live' ? liveUrl : snapshotUrl}
+            alt={printerName}
+            draggable={false}
+            loading="lazy"
+            className={`h-full w-full select-none object-contain${holdingPrevious ? ' absolute inset-0 opacity-0' : ''}`}
+            style={imgStyle}
+            onLoad={() => {
+              clearFirstFrameTimer();
+              renewalRef.current = 'none';
+              snapshotRetriedRef.current = false;
+              setShownSrc(mode === 'live' ? liveUrl : snapshotUrl);
+            }}
+            onError={(e) => {
+              // An img with an empty or missing src is closed, not failed.
+              if (!e.currentTarget.getAttribute('src')) return;
+              if (mode === 'snapshot' && !snapshotRetriedRef.current) {
+                snapshotRetriedRef.current = true;
+                return;
+              }
+              streamFailed();
+            }}
+          />
+        </>
       )}
 
-      {/* Mode indicator (top-right) */}
-      <span
-        className={`absolute right-2 top-2 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-          mode === 'live'
-            ? 'bg-red-500/80 text-white'
-            : mode === 'snapshot'
-              ? 'bg-amber-500/70 text-black'
-              : 'bg-bambu-dark-tertiary/70 text-bambu-gray'
-        }`}
-      >
-        {mode === 'live'
-          ? t('printers.camWall.live')
-          : mode === 'snapshot'
-            ? t('printers.camWall.snap')
-            : t('printers.camWall.off')}
-      </span>
+      {/* Top overlay: status | Built-in/External | Live. The middle column
+          keeps the switcher between the badges when the chip is hidden. */}
+      <div className="pointer-events-none absolute inset-x-2 top-2 z-20 grid grid-cols-3 items-center gap-1">
+        <div className="justify-self-start">
+          {showChip && (
+            <span
+              className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${BUCKET_CHIP_CLASS[bucket]}`}
+            >
+              {hmsErrorCount > 0 && (
+                <AlertTriangle
+                  className="h-3 w-3"
+                  aria-hidden="true"
+                />
+              )}
+              <span>{t(`printers.status.${bucket}`)}</span>
+            </span>
+          )}
+        </div>
+        <div className="pointer-events-auto justify-self-center">
+          {hasExternalCamera && (
+            <CameraSourceSwitcher
+              size="compact"
+              selected={selectedSource}
+              onSelect={selectTileSource}
+            />
+          )}
+        </div>
+        <div className="justify-self-end">
+          <span
+            className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+              mode === 'live'
+                ? 'bg-red-500/80 text-white'
+                : mode === 'snapshot'
+                  ? 'bg-amber-500/70 text-black'
+                  : 'bg-bambu-dark-tertiary/70 text-bambu-gray'
+            }`}
+          >
+            {mode === 'live'
+              ? t('printers.camWall.live')
+              : mode === 'snapshot'
+                ? t('printers.camWall.snap')
+                : t('printers.camWall.off')}
+          </span>
+        </div>
+      </div>
 
       {/* Bottom overlay: name + (when full) print info */}
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/55 to-transparent px-2 pb-1.5 pt-3 text-white">
@@ -386,6 +464,34 @@ export function CameraTile({
   if (!interactive) {
     return (
       <div ref={tileRef} className={rootClass} title={printerName}>
+        {content}
+      </div>
+    );
+  }
+
+  // The source switcher has its own buttons. Those cannot nest inside the
+  // tile's button, so a tile that can switch cameras is a role="button" div.
+  if (hasExternalCamera) {
+    const handleActivate = (e: { target: EventTarget | null; preventDefault?: () => void }) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[data-camera-source-switcher]')) return;
+      e.preventDefault?.();
+      onClick?.();
+    };
+    return (
+      <div
+        ref={tileRef}
+        role="button"
+        tabIndex={0}
+        aria-label={printerName}
+        onClick={handleActivate}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          handleActivate(e);
+        }}
+        className={rootClass}
+        title={printerName}
+      >
         {content}
       </div>
     );
