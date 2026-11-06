@@ -14,6 +14,7 @@ import { useStreamImgRef } from '../hooks/useStreamImgRef';
 import { useCameraViewerId } from '../hooks/useCameraViewerId';
 import { isSideways, useSidewaysBox } from '../hooks/useSidewaysBox';
 import { isStandaloneWebApp, readOpenerTabId, requestCameraPopIn } from '../utils/camera';
+import { CameraSourceSwitcher, printerHasExternalCamera, usePersistedCameraSource, type CameraSource } from '../components/CameraSourceSwitcher';
 
 const MAX_RECONNECT_ATTEMPTS = 5;
 // The server's Retry-After for a snapshot while a live view starts.
@@ -107,6 +108,9 @@ function CameraView({ onPoppedIn }: { onPoppedIn: () => void }) {
     queryFn: () => api.getPrinter(id),
     enabled: id > 0,
   });
+
+  const hasExternalCamera = printerHasExternalCamera(printer);
+  const { selectedSource, selectSource } = usePersistedCameraSource(id, hasExternalCamera);
 
   // Fetch printer status for light toggle and skip objects
   const { data: status } = useQuery({
@@ -495,6 +499,34 @@ function CameraView({ onPoppedIn }: { onPoppedIn: () => void }) {
     }, 100);
   };
 
+  const switchCameraSource = (next: CameraSource) => {
+    if (transitioning || !selectSource(next)) return;
+    snapshotRetriedRef.current = false;
+    setTransitioning(true);
+    setStreamLoading(true);
+    setStreamError(false);
+    setReconnectAttempts(0);
+    setIsReconnecting(false);
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+    }
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+    }
+    if (imgRef.current) {
+      imgRef.current.src = '';
+    }
+    // Same per-viewer stop as refresh: this page leaves the previous source.
+    // Other viewers stay up; stop is a no-op while they are still attached.
+    if (streamMode === 'stream') {
+      stopStream();
+    }
+    setTimeout(() => {
+      setImageKey(Date.now());
+      setTransitioning(false);
+    }, 100);
+  };
+
   const toggleFullscreen = () => {
     if (!containerRef.current) return;
     if (document.fullscreenElement) {
@@ -670,11 +702,12 @@ function CameraView({ onPoppedIn }: { onPoppedIn: () => void }) {
   const waitingForStreamToken = !streamTokenValue && (authEnabled || streamTokenPending);
   const appendToken = (url: string) =>
     streamTokenValue ? `${url}&token=${encodeURIComponent(streamTokenValue)}` : withStreamToken(url);
+  const sourceQuery = hasExternalCamera ? `&source=${encodeURIComponent(selectedSource)}` : '';
   const currentUrl = transitioning || waitingForStreamToken
     ? ''
     : streamMode === 'stream'
-      ? appendToken(`/api/v1/printers/${id}/camera/stream?fps=${fps}&t=${imageKey}&viewer=${viewerId}`)
-      : appendToken(`/api/v1/printers/${id}/camera/snapshot?t=${imageKey}`);
+      ? appendToken(`/api/v1/printers/${id}/camera/stream?fps=${fps}&t=${imageKey}&viewer=${viewerId}${sourceQuery}`)
+      : appendToken(`/api/v1/printers/${id}/camera/snapshot?t=${imageKey}${sourceQuery}`);
 
   const isDisabled = streamLoading || transitioning || isReconnecting;
 
@@ -733,7 +766,7 @@ function CameraView({ onPoppedIn }: { onPoppedIn: () => void }) {
   return (
     <div ref={containerRef} className="min-h-screen bg-black flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-bambu-dark-secondary border-b border-bambu-dark-tertiary">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-bambu-dark-secondary border-b border-bambu-dark-tertiary">
         <h1 className="text-sm font-medium text-white flex items-center gap-2">
           {!openedAsWindow && (
             <button
@@ -748,7 +781,7 @@ function CameraView({ onPoppedIn }: { onPoppedIn: () => void }) {
           <Camera className="w-4 h-4" />
           {printer?.name || `Printer ${id}`}
         </h1>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Mode toggle */}
           <div className="flex bg-bambu-dark rounded p-0.5">
             <button
@@ -774,6 +807,12 @@ function CameraView({ onPoppedIn }: { onPoppedIn: () => void }) {
               {t('camera.snapshot')}
             </button>
           </div>
+          {hasExternalCamera && (
+            <CameraSourceSwitcher
+              selected={selectedSource}
+              onSelect={switchCameraSource}
+            />
+          )}
           <button
             onClick={() => chamberLightMutation.mutate(!status?.chamber_light)}
             disabled={!status?.connected || chamberLightMutation.isPending || !hasPermission('printers:control')}
