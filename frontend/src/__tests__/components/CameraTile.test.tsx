@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, screen } from '@testing-library/react';
+import { act, fireEvent, screen } from '@testing-library/react';
 import { render } from '../utils';
 import { CameraTile } from '../../components/CameraTile';
 import { setStreamToken } from '../../api/client';
@@ -517,6 +517,87 @@ describe('CameraTile', () => {
       await fail();
 
       expect(screen.queryByText('No signal')).toBeNull();
+    });
+  });
+
+  describe('with an external camera', () => {
+    beforeEach(() => {
+      vi.mocked(localStorage.getItem).mockReset();
+      vi.mocked(localStorage.setItem).mockReset();
+    });
+
+    afterEach(() => {
+      vi.mocked(localStorage.getItem).mockReset();
+      vi.mocked(localStorage.setItem).mockReset();
+    });
+
+    it('places the source switcher between the status chip and the live badge', async () => {
+      render(
+        <CameraTile
+          printerId={5}
+          printerName="P1S-Booth"
+          mode="live"
+          snapshotIntervalMs={5000}
+          connected
+          hasExternalCamera
+          statusMode="compact"
+          printerState="RUNNING"
+        />,
+      );
+      await flushMicrotasks();
+
+      expect(screen.getByRole('button', { name: 'Built-in' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'External' })).toBeInTheDocument();
+      expect(screen.getByText('Printing')).toBeInTheDocument();
+      expect(screen.getByText('Live')).toBeInTheDocument();
+      const srcs = [...document.querySelectorAll('img')].map((el) => (el as HTMLImageElement).src);
+      expect(srcs.some((src) => src.includes('source=external'))).toBe(true);
+    });
+
+    it('switches the tile stream to source=builtin without opening the tile', async () => {
+      const onClick = vi.fn();
+      render(
+        <CameraTile
+          printerId={5}
+          printerName="P1S-Booth"
+          mode="live"
+          snapshotIntervalMs={5000}
+          connected
+          hasExternalCamera
+          onClick={onClick}
+        />,
+      );
+      await flushMicrotasks();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Built-in' }));
+      });
+
+      const srcs = [...document.querySelectorAll('img')].map((el) => (el as HTMLImageElement).src);
+      expect(srcs.some((src) => src.includes('source=builtin'))).toBe(true);
+      expect(onClick).not.toHaveBeenCalled();
+      expect(localStorage.setItem).toHaveBeenCalledWith('cameraSource_5', 'builtin');
+    });
+
+    it('reopens the tile on the stored camera for that printer', async () => {
+      vi.mocked(localStorage.getItem).mockImplementation((key) =>
+        key === 'cameraSource_5' ? 'builtin' : null,
+      );
+      render(
+        <CameraTile
+          printerId={5}
+          printerName="P1S-Booth"
+          mode="live"
+          snapshotIntervalMs={5000}
+          connected
+          hasExternalCamera
+        />,
+      );
+      await flushMicrotasks();
+
+      expect(screen.getByRole('button', { name: 'Built-in' })).toHaveClass('bg-bambu-green');
+      const srcs = [...document.querySelectorAll('img')].map((el) => (el as HTMLImageElement).src);
+      expect(srcs.some((src) => src.includes('source=builtin'))).toBe(true);
     });
   });
 });
