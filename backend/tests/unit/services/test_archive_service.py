@@ -254,6 +254,21 @@ class TestArchiveThumbnails:
         parsed = parser.parse()
         assert parsed.get("_thumbnail_data") == b"PLATE1"
 
+    def test_extracts_the_printed_plate_thumbnail_not_plate_1(self, tmp_path):
+        """A multi-plate 3MF must store plate N's PNG when plate N was printed."""
+        import zipfile
+
+        from backend.app.services.archive import ThreeMFParser
+
+        threemf_path = tmp_path / "multi.3mf"
+        with zipfile.ZipFile(threemf_path, "w") as zf:
+            zf.writestr("3D/3dmodel.model", "<model/>")
+            zf.writestr("Metadata/plate_1.png", b"PLATE1")
+            zf.writestr("Metadata/plate_3.png", b"PLATE3")
+
+        parsed = ThreeMFParser(str(threemf_path), plate_number=3).parse()
+        assert parsed.get("_thumbnail_data") == b"PLATE3"
+
 
 class TestThreeMFMetadataHTMLUnescape:
     """3MF `<metadata name="Title">…</metadata>` values are XML-encoded.

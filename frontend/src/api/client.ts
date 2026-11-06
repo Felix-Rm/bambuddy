@@ -6041,6 +6041,12 @@ export const api = {
   getArchiveThumbnail: (id: number) => withMediaToken(`${API_BASE}/archives/${id}/thumbnail?v=${Date.now()}`),
   getArchivePlateThumbnail: (id: number, plateIndex: number) =>
     withMediaToken(`${API_BASE}/archives/${id}/plate-thumbnail/${plateIndex}`),
+  // Prefer the printed plate's preview when plate_id is set (projects,
+  // calendar, archive list). Card view on ArchivesPage does the same inline.
+  getArchiveDisplayThumbnail: (archive: { id: number; plate_id?: number | null }) =>
+    archive.plate_id != null && archive.plate_id > 1
+      ? withMediaToken(`${API_BASE}/archives/${archive.id}/plate-thumbnail/${archive.plate_id}`)
+      : withMediaToken(`${API_BASE}/archives/${archive.id}/thumbnail?v=${Date.now()}`),
   getArchiveDownload: (id: number) => `${API_BASE}/archives/${id}/download`,
   downloadArchive: async (id: number, filename?: string): Promise<void> => {
     const headers: Record<string, string> = {};

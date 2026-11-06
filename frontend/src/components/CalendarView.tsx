@@ -301,9 +301,9 @@ export function CalendarView({ archives, printerId, onPrintClick, highlightedArc
                     }`}
                     style={isHighlighted ? { outline: '4px solid #facc15', outlineOffset: '2px' } : undefined}
                   >
-                    {archive.thumbnail_path ? (
+                    {archive.thumbnail_path || archive.plate_id != null ? (
                       <img
-                        src={api.getArchiveThumbnail(archive.id)}
+                        src={api.getArchiveDisplayThumbnail(archive)}
                         alt=""
                         className="w-12 h-12 rounded object-cover"
                       />
