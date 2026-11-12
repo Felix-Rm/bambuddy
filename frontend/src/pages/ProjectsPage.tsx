@@ -864,9 +864,9 @@ function ProjectCard({ project, parentName, onClick, onEdit, onDelete, hasPermis
                   className="relative aspect-square rounded-lg bg-bambu-dark overflow-hidden border border-bambu-dark-tertiary"
                   title={archive.print_name || 'Unknown'}
                 >
-                  {archive.thumbnail_path ? (
+                  {archive.thumbnail_path || archive.plate_id != null ? (
                     <img
-                      src={api.getArchiveThumbnail(archive.id)}
+                      src={api.getArchiveDisplayThumbnail(archive)}
                       alt={archive.print_name || ''}
                       className="w-full h-full object-cover"
                     />
