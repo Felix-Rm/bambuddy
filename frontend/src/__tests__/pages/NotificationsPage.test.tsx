@@ -22,6 +22,7 @@ const mockAdvancedAuthEnabled = {
   smtp_configured: true,
   local_login_enabled: true,
   autologin_provider_id: null,
+  remember_me_default: false,
 };
 
 const mockSettingsWithNotifications = {

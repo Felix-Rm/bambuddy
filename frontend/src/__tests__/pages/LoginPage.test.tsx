@@ -625,9 +625,9 @@ describe('LoginPage', () => {
       const user = userEvent.setup();
       render(<LoginPage />);
 
-      // Tick "Remember Me"
+      // Tick "Remember Me" (off by default)
       await waitFor(() => {
-        expect(screen.getByRole('checkbox', { name: /Remember Me/i })).toBeInTheDocument();
+        expect(screen.getByRole('checkbox', { name: /Remember Me/i })).not.toBeChecked();
       });
       await user.click(screen.getByRole('checkbox', { name: /Remember Me/i }));
 
@@ -679,6 +679,7 @@ describe('LoginPage', () => {
             smtp_configured: false,
             local_login_enabled: false,
             autologin_provider_id: null,
+            remember_me_default: false,
           })
         ),
         http.get('/api/v1/auth/oidc/providers', () =>
@@ -789,6 +790,26 @@ describe('LoginPage', () => {
       });
       expect(sessionStorage.getItem('auth_remember_me')).toBeNull();
     });
+
+    it('honours remember_me_default=true from advanced-auth status', async () => {
+      server.use(
+        http.get('/api/v1/auth/advanced-auth/status', () =>
+          HttpResponse.json({
+            advanced_auth_enabled: true,
+            smtp_configured: false,
+            local_login_enabled: false,
+            autologin_provider_id: null,
+            remember_me_default: true,
+          })
+        )
+      );
+
+      render(<LoginPage />);
+
+      await waitFor(() => {
+        expect(screen.getByRole('checkbox', { name: /Remember Me/i })).toBeChecked();
+      });
+    });
   });
 
   // #1589 autologin: the page redirects to the IdP on mount, so the
@@ -804,6 +825,7 @@ describe('LoginPage', () => {
             smtp_configured: false,
             local_login_enabled: false,
             autologin_provider_id: 101,
+            remember_me_default: false,
           })
         ),
         http.get('/api/v1/auth/oidc/providers', () => HttpResponse.json([])),
@@ -836,6 +858,7 @@ describe('LoginPage', () => {
         expect(window.location.href).toBe('https://auth.test/authorize?state=xyz');
       });
       expect(sessionStorage.getItem('auth_post_login_redirect')).toBe('/archives?id=5');
+      expect(sessionStorage.getItem('auth_remember_me')).toBeNull();
     });
 
     it('stashes nothing when the user opened /login directly', async () => {
@@ -846,6 +869,27 @@ describe('LoginPage', () => {
         expect(window.location.href).toBe('https://auth.test/authorize?state=xyz');
       });
       expect(sessionStorage.getItem('auth_post_login_redirect')).toBeNull();
+    });
+
+    it('stashes remember me when remember_me_default is true', async () => {
+      server.use(
+        http.get('/api/v1/auth/advanced-auth/status', () =>
+          HttpResponse.json({
+            advanced_auth_enabled: true,
+            smtp_configured: false,
+            local_login_enabled: false,
+            autologin_provider_id: 101,
+            remember_me_default: true,
+          })
+        )
+      );
+      arriveAtLogin();
+      render(<LoginPage />);
+
+      await waitFor(() => {
+        expect(window.location.href).toBe('https://auth.test/authorize?state=xyz');
+      });
+      expect(sessionStorage.getItem('auth_remember_me')).toBe('1');
     });
   });
 

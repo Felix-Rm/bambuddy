@@ -413,6 +413,18 @@ class AppSettings(BaseModel):
             "Longer sessions reduce automatic logout protection."
         ),
     )
+    # Pre-check "Remember Me" on the login page (and autologin SSO stash).
+    # Does not change JWT lifetime — only whether the token is also written
+    # to localStorage so it survives closing the browser/tab.
+    remember_me_default: bool = Field(
+        default=False,
+        description=(
+            "When true, the login page Remember Me checkbox starts checked "
+            "(and SSO autologin stashes a persistent preference). Users can "
+            "still uncheck it per login. Default false preserves session-only "
+            "tokens unless the admin opts in."
+        ),
+    )
 
     # User email notifications (requires Advanced Authentication)
     user_notifications_enabled: bool = Field(
@@ -836,6 +848,7 @@ class AppSettingsUpdate(BaseModel):
     prometheus_token: str | None = None
     low_stock_threshold: float | None = Field(default=None, ge=0.1, le=99.9)
     session_max_hours: int | None = Field(default=None, ge=1, le=720)
+    remember_me_default: bool | None = None
     user_notifications_enabled: bool | None = None
     default_bed_levelling: TriState | None = None
     default_flow_cali: TriState | None = None

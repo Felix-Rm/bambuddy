@@ -227,3 +227,64 @@ class TestSettingsAPIExposesSessionMaxHours:
             json={"session_max_hours": SESSION_MAX_HOURS_HARD_CEILING + 1},
         )
         assert response.status_code == 422
+
+
+async def _set_remember_me_default(db: AsyncSession, value: str | None) -> None:
+    """Upsert the remember_me_default setting row (value=None deletes it)."""
+    result = await db.execute(select(Settings).where(Settings.key == "remember_me_default"))
+    existing = result.scalar_one_or_none()
+    if value is None:
+        if existing is not None:
+            await db.delete(existing)
+            await db.commit()
+        return
+    if existing is None:
+        db.add(Settings(key="remember_me_default", value=value))
+    else:
+        existing.value = value
+    await db.commit()
+
+
+class TestSettingsAPIExposesRememberMeDefault:
+    """The /settings API must round-trip remember_me_default as a bool."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_default_is_false(self, async_client: AsyncClient, db_session: AsyncSession):
+        await _set_remember_me_default(db_session, None)
+        response = await async_client.get("/api/v1/settings/")
+        assert response.status_code == 200
+        assert response.json()["remember_me_default"] is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_update_accepts_true(self, async_client: AsyncClient, db_session: AsyncSession):
+        response = await async_client.patch(
+            "/api/v1/settings/",
+            json={"remember_me_default": True},
+        )
+        assert response.status_code == 200
+        assert response.json()["remember_me_default"] is True
+        result = await db_session.execute(select(Settings).where(Settings.key == "remember_me_default"))
+        row = result.scalar_one()
+        assert row.value == "true"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_advanced_auth_status_surfaces_default(
+        self, async_client: AsyncClient, db_session: AsyncSession
+    ):
+        await _set_remember_me_default(db_session, None)
+        response = await async_client.get("/api/v1/auth/advanced-auth/status")
+        assert response.status_code == 200
+        assert response.json()["remember_me_default"] is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_advanced_auth_status_surfaces_true(
+        self, async_client: AsyncClient, db_session: AsyncSession
+    ):
+        await _set_remember_me_default(db_session, "true")
+        response = await async_client.get("/api/v1/auth/advanced-auth/status")
+        assert response.status_code == 200
+        assert response.json()["remember_me_default"] is True
