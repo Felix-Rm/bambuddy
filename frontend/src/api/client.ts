@@ -72,6 +72,10 @@ export function getAuthToken(): string | null {
 // by what the URL points at, not by convenience:
 //
 //   streamToken — live camera only. Minting one costs camera:view.
+//                 Persisted in sessionStorage so a camera popup (which copies
+//                 sessionStorage from its opener) can attach the <img> on
+//                 first paint instead of waiting for another
+//                 POST /camera/stream-token round trip.
 //   mediaToken  — thumbnails, previews, timelapses, covers, icons. Minted by
 //                 any signed-in user and carries their identity, so those
 //                 routes can apply the same ownership rules as everywhere else.
@@ -80,15 +84,52 @@ export function getAuthToken(): string | null {
 // a library thumbnail without also being granted the live feed of the room the
 // printer sits in — and, because a stream token names nobody, those routes had
 // no identity to scope by and served any row to any holder.
+const STREAM_TOKEN_STORAGE_KEY = 'bambuddy_camera_stream_token';
+const STREAM_TOKEN_AT_KEY = 'bambuddy_camera_stream_token_at';
 let streamToken: string | null = null;
+let streamTokenSetAt = 0;
 let mediaToken: string | null = null;
+
+function persistStreamToken(token: string | null, setAt: number) {
+  try {
+    if (token) {
+      sessionStorage.setItem(STREAM_TOKEN_STORAGE_KEY, token);
+      sessionStorage.setItem(STREAM_TOKEN_AT_KEY, String(setAt));
+    } else {
+      sessionStorage.removeItem(STREAM_TOKEN_STORAGE_KEY);
+      sessionStorage.removeItem(STREAM_TOKEN_AT_KEY);
+    }
+  } catch {
+    // Private mode / disabled storage.
+  }
+}
+
+function hydrateStreamToken() {
+  if (streamToken) return;
+  try {
+    const stored = sessionStorage.getItem(STREAM_TOKEN_STORAGE_KEY);
+    if (!stored) return;
+    streamToken = stored;
+    streamTokenSetAt = Number(sessionStorage.getItem(STREAM_TOKEN_AT_KEY) || Date.now());
+  } catch {
+    // ignore
+  }
+}
 
 export function setStreamToken(token: string | null) {
   streamToken = token;
+  streamTokenSetAt = token ? Date.now() : 0;
+  persistStreamToken(token, streamTokenSetAt);
 }
 
 export function getStreamToken(): string | null {
+  hydrateStreamToken();
   return streamToken;
+}
+
+export function getStreamTokenSetAt(): number {
+  hydrateStreamToken();
+  return streamTokenSetAt;
 }
 
 export function setMediaToken(token: string | null) {
@@ -101,9 +142,10 @@ export function getMediaToken(): string | null {
 
 /** Append the camera stream token to a URL if available (live camera only). */
 export function withStreamToken(url: string): string {
-  if (!streamToken) return url;
+  const token = getStreamToken();
+  if (!token) return url;
   const sep = url.includes('?') ? '&' : '?';
-  return `${url}${sep}token=${encodeURIComponent(streamToken)}`;
+  return `${url}${sep}token=${encodeURIComponent(token)}`;
 }
 
 /** Append the media token to a URL if available (for <img>/<video> src). */
@@ -388,6 +430,7 @@ export interface CamWallPrinter {
   layer_num: number | null;
   total_layers: number | null;
   hms_errors: HMSError[];
+  has_external_camera?: boolean;
 }
 
 // Streaming-overlay feed (#2613). The subset of print state the /overlay page
