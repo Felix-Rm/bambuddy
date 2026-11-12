@@ -20,7 +20,7 @@ export default {
     expandSidebar: 'Maximera sidofältet',
     update: 'Uppdatera',
     updateAvailable: 'Uppdatering tillgänglig: v{{version}}',
-    updateAvailableBanner: 'Version {{version}} är tillgänglig!',
+    updateAvailableBanner: 'Version {{version}} är tillgänglig! Den här instansen kör en anpassad fork-build — applicera inte en upstream-release förrän denna fork har rebasats på den, annars riskerar du dataförlust och oväntat beteende.',
     viewUpdate: 'Visa uppdatering',
     viewOnGithub: 'Visa på GitHub',
     keyboardShortcuts: 'Tangentbordsgenvägar (?)',

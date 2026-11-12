@@ -20,7 +20,7 @@ export default {
     expandSidebar: 'Kenar çubuğunu genişlet',
     update: 'Güncelle',
     updateAvailable: 'Güncelleme mevcut: v{{version}}',
-    updateAvailableBanner: '{{version}} sürümü kullanılabilir!',
+    updateAvailableBanner: '{{version}} sürümü kullanılabilir! Bu örnek özel bir fork derlemesi çalıştırıyor — bu fork o sürüme rebase edilmeden upstream sürümünü uygulamayın; aksi halde veri kaybı veya beklenmeyen davranış riski vardır.',
     viewUpdate: 'Güncellemeyi gör',
     viewOnGithub: "GitHub'da gör",
     keyboardShortcuts: 'Klavye kısayolları (?)',

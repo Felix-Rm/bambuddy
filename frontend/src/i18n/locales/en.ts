@@ -20,7 +20,7 @@ export default {
     expandSidebar: 'Expand sidebar',
     update: 'Update',
     updateAvailable: 'Update available: v{{version}}',
-    updateAvailableBanner: 'Version {{version}} is available!',
+    updateAvailableBanner: 'Version {{version}} is available! This instance runs a custom fork build — do not apply an upstream release until this fork has been rebased onto it, or you risk data loss and unexpected behaviour.',
     viewUpdate: 'View update',
     viewOnGithub: 'View on GitHub',
     keyboardShortcuts: 'Keyboard shortcuts (?)',

@@ -20,7 +20,7 @@ export default {
     expandSidebar: 'サイドバーを開く',
     update: 'アップデート',
     updateAvailable: 'アップデートあり: v{{version}}',
-    updateAvailableBanner: 'バージョン {{version}} が利用可能です！',
+    updateAvailableBanner: 'バージョン {{version}} が利用可能です！このインスタンスはカスタムフォークビルドです。フォークがその版へリベースされる前に upstream リリースを適用しないでください。データ損失や予期しない動作の恐れがあります。',
     viewUpdate: 'アップデートを表示',
     viewOnGithub: 'GitHubで表示',
     keyboardShortcuts: 'キーボードショートカット (?)',

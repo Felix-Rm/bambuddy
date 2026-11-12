@@ -20,7 +20,7 @@ export default {
     expandSidebar: 'Rozwiń pasek boczny',
     update: 'Aktualizacja',
     updateAvailable: 'Dostępna aktualizacja: v{{version}}',
-    updateAvailableBanner: 'Dostępna jest wersja {{version}}!',
+    updateAvailableBanner: "Dostępna jest wersja {{version}}! Ta instancja działa na własnym buildzie forka — nie wgrywaj release'u upstream, dopóki ten fork nie zostanie na niego zrebase'owany; grozi utrata danych lub nieoczekiwane zachowanie.",
     viewUpdate: 'Pokaż aktualizację',
     viewOnGithub: 'Zobacz na GitHub',
     keyboardShortcuts: 'Skróty klawiszowe (?)',

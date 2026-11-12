@@ -19,7 +19,7 @@ export default {
     expandSidebar: '사이드바 펼치기',
     update: '업데이트',
     updateAvailable: '업데이트 가능: v{{version}}',
-    updateAvailableBanner: '버전 {{version}}이(가) 출시되었습니다!',
+    updateAvailableBanner: '버전 {{version}}이(가) 출시되었습니다! 이 인스턴스는 커스텀 포크 빌드입니다. 포크가 해당 버전에 리베이스되기 전에 업스트림 릴리스를 적용하지 마세요. 데이터 손실이나 예기치 않은 동작이 발생할 수 있습니다.',
     viewUpdate: '업데이트 보기',
     viewOnGithub: 'GitHub에서 보기',
     keyboardShortcuts: '키보드 단축키 (?)',

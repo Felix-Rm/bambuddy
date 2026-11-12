@@ -19,7 +19,7 @@ export default {
     expandSidebar: "Развернуть боковую панель",
     update: "Обновить",
     updateAvailable: "Доступно обновление: v{{version}}",
-    updateAvailableBanner: "Доступна версия {{version}}!",
+    updateAvailableBanner: 'Доступна версия {{version}}! Этот экземпляр работает на сборке собственного форка — не устанавливайте upstream-релиз, пока форк не будет на него перебазирован; иначе возможны потеря данных и непредсказуемое поведение.',
     viewUpdate: "Посмотреть обновление",
     viewOnGithub: "Открыть на GitHub",
     keyboardShortcuts: "Горячие клавиши (?)",

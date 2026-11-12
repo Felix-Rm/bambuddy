@@ -20,7 +20,7 @@ export default {
     expandSidebar: 'Seitenleiste ausklappen',
     update: 'Aktualisieren',
     updateAvailable: 'Update verfügbar: v{{version}}',
-    updateAvailableBanner: 'Version {{version}} ist verfügbar!',
+    updateAvailableBanner: 'Version {{version}} ist verfügbar! Diese Instanz läuft als Custom-Fork-Build — kein Upstream-Release einspielen, bevor dieser Fork darauf rebased wurde; sonst drohen Datenverlust und unerwartetes Verhalten.',
     viewUpdate: 'Update anzeigen',
     viewOnGithub: 'Auf GitHub ansehen',
     keyboardShortcuts: 'Tastaturkürzel (?)',

@@ -20,7 +20,7 @@ export default {
     expandSidebar: 'Zijbalk uitklappen',
     update: 'Bijwerken',
     updateAvailable: 'Update beschikbaar: v{{version}}',
-    updateAvailableBanner: 'Versie {{version}} is beschikbaar!',
+    updateAvailableBanner: 'Versie {{version}} is beschikbaar! Deze instantie draait een custom fork-build — pas geen upstream-release toe voordat deze fork erop is gerebased; anders dreigt dataverlies of onverwacht gedrag.',
     viewUpdate: 'Update bekijken',
     viewOnGithub: 'Bekijken op GitHub',
     keyboardShortcuts: 'Sneltoetsen (?)',

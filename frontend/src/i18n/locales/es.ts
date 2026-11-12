@@ -20,7 +20,7 @@ export default {
     expandSidebar: 'Expandir barra lateral',
     update: 'Actualizar',
     updateAvailable: 'Actualización disponible: v{{version}}',
-    updateAvailableBanner: '¡La versión {{version}} está disponible!',
+    updateAvailableBanner: '¡La versión {{version}} está disponible! Esta instancia ejecuta un build de fork personalizado: no aplique una release upstream hasta que este fork se haya rebaseado sobre ella; puede haber pérdida de datos o un comportamiento inesperado.',
     viewUpdate: 'Ver actualización',
     viewOnGithub: 'Ver en GitHub',
     keyboardShortcuts: 'Atajos de teclado (?)',

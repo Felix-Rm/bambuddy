@@ -2894,7 +2894,10 @@ export function SettingsPage() {
                     <div className="flex items-start justify-between">
                       <div>
                         <p className="text-bambu-green font-medium">
-                          Update available: v{updateCheck.latest_version}
+                          {t('nav.updateAvailableBanner', {
+                            version: updateCheck.latest_version,
+                            defaultValue: `Version ${updateCheck.latest_version} is available! This instance runs a custom fork build — do not apply an upstream release until this fork has been rebased onto it, or you risk data loss and unexpected behaviour.`,
+                          })}
                         </p>
                         {updateCheck.release_name && updateCheck.release_name !== updateCheck.latest_version && (
                           <p className="text-sm text-bambu-gray mt-1">{updateCheck.release_name}</p>

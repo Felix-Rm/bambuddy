@@ -20,7 +20,7 @@ export default {
     expandSidebar: '展開側邊欄',
     update: '更新',
     updateAvailable: '有可用更新：v{{version}}',
-    updateAvailableBanner: '版本 {{version}} 已發布！',
+    updateAvailableBanner: '版本 {{version}} 已發布！目前實例執行的是自訂 fork 建置——在本 fork 變基到該版本之前，請勿套用上游發行版，否則可能導致資料遺失或異常行為。',
     viewUpdate: '檢視更新',
     viewOnGithub: '在 GitHub 上檢視',
     keyboardShortcuts: '鍵盤快捷鍵 (?)',

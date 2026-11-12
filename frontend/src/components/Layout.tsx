@@ -1115,20 +1115,20 @@ export function Layout() {
           </div>
         )}
         <AnnouncementBanner items={bannerItems} onOpen={openAnnouncements} markRead={markAnnouncementRead} />
-        {/* Persistent update banner */}
+        {/* Persistent update banner (fork build: warn before applying upstream) */}
         {showUpdateBanner && (
-          <div className="bg-bambu-green/20 border-b border-bambu-green/30 px-4 py-2 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm">
-              <ArrowUpCircle className="w-4 h-4 text-bambu-green" />
-              <span>
+          <div className="bg-amber-100 dark:bg-amber-500/20 border-b border-amber-300 dark:border-amber-500/30 px-4 py-2 flex items-center justify-between gap-3">
+            <div className="flex items-start gap-2 text-sm min-w-0">
+              <ArrowUpCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+              <span className="text-amber-900 dark:text-amber-100">
                 {t('nav.updateAvailableBanner', {
                   version: updateCheck?.latest_version,
-                  defaultValue: `Version ${updateCheck?.latest_version} is available!`
+                  defaultValue: `Version ${updateCheck?.latest_version} is available! This instance runs a custom fork build — do not apply an upstream release until this fork has been rebased onto it, or you risk data loss and unexpected behaviour.`,
                 })}
               </span>
               <button
                 onClick={() => navigate('/settings')}
-                className="text-bambu-green hover:text-bambu-green/80 font-medium underline"
+                className="text-amber-800 dark:text-amber-300 hover:text-amber-950 dark:hover:text-amber-200 font-medium underline whitespace-nowrap flex-shrink-0"
               >
                 {t('nav.viewUpdate', { defaultValue: 'View update' })}
               </button>
