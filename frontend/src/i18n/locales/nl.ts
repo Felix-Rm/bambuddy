@@ -118,6 +118,7 @@ export default {
     unknownError: 'Onbekende fout',
     today: 'Vandaag',
     tomorrow: 'Morgen',
+    inDays: '(over {{count}} dagen)',
     asap: 'Zo snel mogelijk',
     overdue: 'Te laat',
     now: 'Nu',

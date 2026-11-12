@@ -117,6 +117,7 @@ export default {
     unknownError: '不明なエラー',
     today: '今日',
     tomorrow: '明日',
+    inDays: '({{count}}日後)',
     asap: '即時',
     overdue: '期限超過',
     now: '今すぐ',

@@ -117,6 +117,7 @@ export default {
     unknownError: 'Bilinmeyen hata',
     today: 'Bugün',
     tomorrow: 'Yarın',
+    inDays: '({{count}} gün içinde)',
     asap: 'En kısa sürede',
     overdue: 'Gecikmiş',
     now: 'Şimdi',

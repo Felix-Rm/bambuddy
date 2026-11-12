@@ -118,6 +118,7 @@ export default {
     unknownError: '未知错误',
     today: '今天',
     tomorrow: '明天',
+    inDays: '({{count}} 天后)',
     asap: '尽快',
     overdue: '已逾期',
     now: '现在',

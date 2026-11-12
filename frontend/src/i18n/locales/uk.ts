@@ -117,6 +117,7 @@ export default {
     unknownError: "Невідома помилка",
     today: "Сьогодні",
     tomorrow: "Завтра",
+    inDays: "(через {{count}} дн.)",
     asap: "Якнайшвидше",
     overdue: "Протерміновано",
     now: "Зараз",
