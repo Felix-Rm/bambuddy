@@ -40,7 +40,12 @@ class PrinterSensorHistoryResponse(BaseModel):
 @router.get("/{printer_id}", response_model=PrinterSensorHistoryResponse)
 async def get_printer_sensor_history(
     printer_id: int,
-    hours: int = Query(default=24, ge=1, le=168, description="Hours of history (1-168)"),
+    hours: float = Query(
+        default=24,
+        ge=0.25,
+        le=168,
+        description="Hours of history (0.25–168; 0.25 = 15 minutes)",
+    ),
     kinds: str | None = Query(
         default=None,
         description="Comma-separated list of sensor kinds (nozzle, nozzle_2, bed, chamber). All by default.",

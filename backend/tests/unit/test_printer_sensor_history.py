@@ -116,6 +116,42 @@ async def test_get_clamps_to_hours_window(async_client: AsyncClient, db_session:
 
 
 @pytest.mark.asyncio
+async def test_get_accepts_fifteen_minute_window(async_client: AsyncClient, db_session: AsyncSession):
+    """Fractional hours (0.25 = 15m) are accepted for short heater-history spans."""
+    printer = Printer(name="P1S", serial_number="P1S-15M-001", ip_address="10.0.0.30", access_code="12345678")
+    db_session.add(printer)
+    await db_session.commit()
+    await db_session.refresh(printer)
+
+    now = datetime.now(timezone.utc)
+    db_session.add(
+        PrinterSensorHistory(
+            printer_id=printer.id,
+            sensor_kind="nozzle",
+            value=200.0,
+            target=220.0,
+            recorded_at=now - timedelta(minutes=5),
+        )
+    )
+    db_session.add(
+        PrinterSensorHistory(
+            printer_id=printer.id,
+            sensor_kind="nozzle",
+            value=180.0,
+            target=220.0,
+            recorded_at=now - timedelta(minutes=30),
+        )
+    )
+    await db_session.commit()
+
+    response = await async_client.get(f"/api/v1/printer-sensor-history/{printer.id}?hours=0.25")
+    assert response.status_code == 200
+    nozzle = next(s for s in response.json()["series"] if s["sensor_kind"] == "nozzle")
+    assert len(nozzle["data"]) == 1
+    assert nozzle["data"][0]["value"] == 200.0
+
+
+@pytest.mark.asyncio
 async def test_history_cannot_be_deleted_through_the_api(async_client: AsyncClient, db_session: AsyncSession):
     """Old history goes by the retention setting only; there is no delete route."""
     printer = Printer(name="Keep", serial_number="KEEP-001", ip_address="10.0.0.20", access_code="12345678")
